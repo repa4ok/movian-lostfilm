@@ -1,0 +1,12 @@
+{
+    "type": "ecmascript",
+    "id": "testlostfilm",
+    "file": "lostfilm.js",
+    "showtimeVersion": "4.9.401",
+    "version": "0.1",
+    "author": "repa4ok",
+    "title": "LostFilm.TV",
+    "icon": "logo.png",
+    "synopsis": "LostFilm.TV. Лучшие сериалы.",
+    "category": "video"
+}
