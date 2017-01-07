@@ -1,0 +1,30 @@
+#import "skin://theme.view"
+
+widget(container_z, {
+
+  height: 2em;
+  ListItemBevel();
+  ListItemHighlight();
+
+  focusable: true;
+  onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
+  onEvent(itemMenu, eventWithProp(defaultInfo, $self));
+
+  widget(container_x, {
+    style: "ListItem";
+
+    widget(icon, {
+      alpha: select($self.restartpos > 0 || $self.playcount > 0 || $self.metadata.watched, 1, 0);
+      source: select($self.playcount > 0 || $self.metadata.watched, "../icons/watched.svg", "../icons/in-progress.svg");
+
+      style: "ListItemIcon";
+    });
+
+    widget(label, {
+      filterConstraintX: true;
+      caption: $self.metadata.title;
+      style: ["ListItemLabel", "ListItemLabelContainer"];
+    });
+
+  });
+});

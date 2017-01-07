@@ -25,33 +25,65 @@
     var store = plugin.createStore("config", true);
 
     plugin.addURI(PREFIX + ":start", start);
-    plugin.addURI(PREFIX + ":serialInfo:(.*):(.*)", serialInfo);
-    plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*)", function (page, c, s, e) {
-        /*
-        page.loading = true;
-        var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
-        var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
-        response = showtime.httpReq(torrentsUrl);
-        var url720 = html.parse(response.toString()).root.getElementByClassName("inner-box--link main")[1].children[0].attributes.getNamedItem("href")["value"];
-        showtime.print("url720 = " + url720);
-        var x = http.request(url720);
-        page.loading = false;
-        page.redirect('torrent:video:data:application/x-bittorrent;base64,' + Duktape.enc('base64', x.bytes));
-        */
+    plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
 
+    plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*):(.*)", function (page, serieName, c, s, e) {
         var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         response = showtime.httpReq(torrentsUrl);
-        var url720 = html.parse(response.toString()).root.getElementByClassName("inner-box--link main")[1].children[0].attributes.getNamedItem("href")["value"];
-        showtime.print("url720 = " + url720);
-        var x = http.request(url720);
+
+        var foundTorrents = {
+            "sd": undefined,
+            "hd": undefined,
+            "fhd": undefined
+        };
+        //var url720 = html.parse(response.toString()).root.getElementByClassName("inner-box--link main")[1].children[0].attributes.getNamedItem("href")["value"];
+        var torrentArr = html.parse(response.toString()).root.getElementByClassName("inner-box--item");
+        for (var i = 0; i < torrentArr.length; ++i) {
+            var currentTorrent = torrentArr[i];
+            var currentTorrentLabel = currentTorrent.getElementByClassName("inner-box--label")[0].textContent.trim().toLowerCase();
+            var currentTorrentLink = currentTorrent.getElementByClassName("inner-box--link main")[0].children[0].attributes.getNamedItem("href").value;
+            showtime.print("found torrent " + currentTorrentLabel + ". url = " + currentTorrentLink);
+
+            if (currentTorrentLabel == "sd") {
+                foundTorrents["sd"] = currentTorrentLink;
+            } else if (currentTorrentLabel == "mp4" || currentTorrentLabel == "hd" || currentTorrentLabel == "720") {
+                foundTorrents["hd"] = currentTorrentLink;
+            } else if (currentTorrentLabel == "fullhd" || currentTorrentLabel == "full hd" || currentTorrentLabel == "1080") {
+                foundTorrents["fhd"] = currentTorrentLink;
+            }
+        }
+
+        var desiredUrl = foundTorrents[store.quality];
+
+        if (desiredUrl == undefined) {
+            if (foundTorrents["sd"]) {
+                desiredUrl = foundTorrents["sd"];
+                showtime.print(store.quality + " torrent not found. Playing SD instead...");
+            } else if (foundTorrents["hd"]) {
+                desiredUrl = foundTorrents["hd"];
+                showtime.print(store.quality + " torrent not found. Playing HD instead....");
+            } else if (foundTorrents["fhd"]) {
+                desiredUrl = foundTorrents["fhd"];
+                showtime.print(store.quality + " torrent not found. Playing Full HD instead....");
+            }
+        } else {
+            showtime.print(store.quality + " torrent found. Playing it...");
+        }
+
+        if (desiredUrl == undefined || desiredUrl == "") {
+            page.error("Failed to find desired torrent.");
+            return;
+        }
+
+        var x = http.request(desiredUrl);
         page.loading = false;
 
         page.source = "videoparams:" + showtime.JSONEncode({
-            canonicalUrl: PREFIX + ":torrent:" + c + ":" + s + ":" + e,
+            title: serieName,
+            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + c + ":" + s + ":" + e,
             sources: [{
-                // url: "hls:http://s5.cdnapponline.com/video/d0ded7226ccd4c75/index.m3u8?cd=0&expired=1483538651&mw_pid=157&signature=dc27b10ea27897628341503386b21a47"
-                url: 'torrent:video:' + url720
+                url: 'torrent:video:' + desiredUrl
             }]
         });
         page.type = "video";
@@ -66,13 +98,17 @@
         // need to move to separate function
 
         page.options.createMultiOpt('quality', 'Quality', [
-            ['qSD',  'SD', true],
-            ['qHD',       'HD'],
-            ['qFHD',      'Full HD']], 
-            function(order) {
-                // do nothing
+            ['sd',  'SD', true],
+            ['hd',       'HD'],
+            ['fhd',      'Full HD']], 
+            function(v) {
+                store.quality = v;
             },
-            true);
+        true);
+
+        if (store.quality == undefined || store.quality == "") {
+            store.quality = "sd";
+        }
 
         if (checkCookies()) {
             applyCookies();
@@ -91,8 +127,8 @@
 
     function checkCookies() {
         //var response = showtime.httpReq("http://delta.lostfilm.tv");
-        showtime.print("CHECK COOCKIES: ");
-        showtime.print(store.userCookie);
+        // showtime.print("CHECK COOCKIES: ");
+        // showtime.print(store.userCookie);
         // if (response.multiheaders["Set-Cookie"]) {
             // saveUserCookie(response.multiheaders);
             // return true;
@@ -120,8 +156,9 @@
         for (var i = 0; i < serialsList.length; ++i) {
             var currentSerialBody = serialsList[i].getElementByClassName(["body"])[0];
             var currentSerialName = currentSerialBody.getElementByClassName(["name-ru"])[0].textContent;
-            var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href")["value"];
-            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" + currentSerialLink, "directory", {
+            var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href").value;
+            var currentSerialId = serialsList[i].children[2].attributes.getNamedItem("id").value.replace("fav_", "");
+            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" + currentSerialId + ":" + currentSerialLink, "directory", {
                 title: currentSerialName
             });
         }
@@ -137,10 +174,16 @@
             var currentSerialBody = serialsList[i].getElementByClassName(["body"])[0];
             var currentSerialName = currentSerialBody.getElementByClassName(["name-ru"])[0].textContent;
             var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href")["value"];
-            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" + currentSerialLink, "directory", {
+            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" -1 + ":" + currentSerialLink, "directory", {
                 title: currentSerialName
             });
         }
+
+        page.appendItem("", "directory", {
+            // FIXME: icon is not applied
+            //icon: "watched.svg",
+            title: "More..."
+        });
     }
 
 
@@ -155,13 +198,33 @@ function parseISO8601Duration(s) {
     (m[5] === undefined ? 0 : m[5]) * 86400;
 };
 
-    function serialInfo(page, serialName, url) {
+    function serialInfo(page, serialName, serialID, url) {
         page.metadata.logo = LOGO;
         page.metadata.title = serialName;
-        page.model.contents = "list";
+        // page.model.contents = "list";
         page.type = "directory";
+        page.metadata.glwview = plugin.path + "views/serial.view";
         page.loading = true;
+/*
+        // get watched series
+        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': "serial",
+                'type': "getmark",
+                'id': serialID
+            },
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Referer': url,
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'http://delta.lostfilm.tv'
+            }
+        });
 
+        showtime.print("LOSTFILM WATCHED");
+        showtime.print(showtime.JSONDecode(response));
+*/
         var response = showtime.httpReq("http://delta.lostfilm.tv/" + url + "/seasons/");
         var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
         for (var i = 0; i < seasonsList.length; ++i) {
@@ -175,15 +238,20 @@ function parseISO8601Duration(s) {
                 if (seasonSeries[j].attributes.length > 0) {
                     continue;
                 }
+                var watched = seasonSeries[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("class").value;
                 var serieDiv = seasonSeries[j].getElementByClassName(["gamma"])[0].children[0];
                 var serieDirtyName = serieDiv.textContent.trim();
                 var serieNativeName = serieDiv.getElementByTagName("span")[0].textContent;
-                var serieName = (seasonSeries.length - j) + ": " + serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
+                var serieNumber = seasonSeries.length - j;
+                var serieName = serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
+
+                showtime.print("LOSTFILM serie " + serieName + ": " + watched);
+
                 var serieAttrs = seasonSeries[j].getElementByClassName(["zeta"])[0].children[0].attributes.getNamedItem("onclick")["value"].replace("PlayEpisode('", "").replace("')", "").split("','");
-                page.appendItem(PREFIX + ":torrent:" + serieAttrs[0] + ":" + serieAttrs[1] + ":" + serieAttrs[2], "video", {
-                    title: serieName,
-                    duration: "56:00"
-                })
+                page.appendItem(PREFIX + ":torrent:" + serieName + ":" + serieAttrs[0] + ":" + serieAttrs[1] + ":" + serieAttrs[2], "video", {
+                    title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName),
+                    watched: false
+                });
             }
         }
 
