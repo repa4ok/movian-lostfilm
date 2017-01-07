@@ -6,22 +6,11 @@
     var LOGO = Plugin.path + "logo.png";
 
     var service = require("showtime/service");
-    var settings = require("showtime/settings");
-    var page = require("showtime/page");
     var http = require("showtime/http");
     var html = require("showtime/html");
-    var io = require("native/io");
-    var popup = require("native/popup");
 
     service.create(TITLE, PREFIX + ":start", "video", true, LOGO);
 
-    /*
-    settings.globalSettings(PREFIX, TITLE, LOGO, SYNOPSIS);
-    settings.createInfo("info", LOGO, "Plugin developed by repa4ok. \n");
-    settings.createString("userCookie", "Cookie пользователя", "DONT_TOUCH_THIS", function (v) {
-        service.userCookie = v;
-    }, true);
-*/
     var store = plugin.createStore("config", true);
 
     plugin.addURI(PREFIX + ":start", start);
@@ -37,7 +26,7 @@
             "hd": undefined,
             "fhd": undefined
         };
-        //var url720 = html.parse(response.toString()).root.getElementByClassName("inner-box--link main")[1].children[0].attributes.getNamedItem("href")["value"];
+
         var torrentArr = html.parse(response.toString()).root.getElementByClassName("inner-box--item");
         for (var i = 0; i < torrentArr.length; ++i) {
             var currentTorrent = torrentArr[i];
