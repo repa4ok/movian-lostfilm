@@ -163,7 +163,7 @@
             var currentSerialBody = serialsList[i].getElementByClassName(["body"])[0];
             var currentSerialName = currentSerialBody.getElementByClassName(["name-ru"])[0].textContent;
             var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href")["value"];
-            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" -1 + ":" + currentSerialLink, "directory", {
+            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":-1:" + currentSerialLink, "directory", {
                 title: currentSerialName
             });
         }
