@@ -14,9 +14,12 @@
     var store = plugin.createStore("config", true);
 
     plugin.addURI(PREFIX + ":start", start);
+    plugin.addURI(PREFIX + ":allSerials", populateAll);
     plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
 
     plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*):(.*)", function (page, serieName, c, s, e) {
+        page.loading = true;
+
         var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         response = showtime.httpReq(torrentsUrl);
@@ -115,15 +118,6 @@
     }
 
     function checkCookies() {
-        //var response = showtime.httpReq("http://delta.lostfilm.tv");
-        // showtime.print("CHECK COOCKIES: ");
-        // showtime.print(store.userCookie);
-        // if (response.multiheaders["Set-Cookie"]) {
-            // saveUserCookie(response.multiheaders);
-            // return true;
-        // } else {
-            // return false;
-        // }
         return store.userCookie && store.userCookie != "DONT_TOUCH_THIS";
     }
 
@@ -139,16 +133,10 @@
             title: "Favorites"
         });
 
-        var response = showtime.httpReq("http://delta.lostfilm.tv/series/?type=search&s=2&t=99");
-        var serialsListDiv = html.parse(response.toString()).root.getElementById("serials_list");
-        var serialsList = serialsListDiv.getElementByClassName(["row"]);
-        for (var i = 0; i < serialsList.length; ++i) {
-            var currentSerialBody = serialsList[i].getElementByClassName(["body"])[0];
-            var currentSerialName = currentSerialBody.getElementByClassName(["name-ru"])[0].textContent;
-            var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href").value;
-            var currentSerialId = serialsList[i].children[2].attributes.getNamedItem("id").value.replace("fav_", "");
-            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":" + currentSerialId + ":" + currentSerialLink, "directory", {
-                title: currentSerialName
+        var favorite = getSerialList(0, 2, 99);
+        for (var i = 0; i < favorite.length; ++i) {
+            page.appendItem(PREFIX + ":serialInfo:" + favorite[i].title + ":" + favorite[i].id + ":" + favorite[i].link, "directory", {
+                title: favorite[i].title
             });
         }
 
@@ -156,36 +144,76 @@
             title: "Popular"
         });
 
-        response = showtime.httpReq("http://delta.lostfilm.tv/series/?type=search&s=1&t=0");
-        serialsListDiv = html.parse(response.toString()).root.getElementById("serials_list");
-        serialsList = serialsListDiv.getElementByClassName(["row"]);
-        for (var i = 0; i < serialsList.length; ++i) {
-            var currentSerialBody = serialsList[i].getElementByClassName(["body"])[0];
-            var currentSerialName = currentSerialBody.getElementByClassName(["name-ru"])[0].textContent;
-            var currentSerialLink = serialsList[i].getElementByClassName(["no-decoration"])[0].attributes.getNamedItem("href")["value"];
-            page.appendItem(PREFIX + ":serialInfo:" + currentSerialName + ":-1:" + currentSerialLink, "directory", {
-                title: currentSerialName
+        var top10 = getSerialList(0, 1, 0);
+        for (var i = 0; i < top10.length; ++i) {
+            page.appendItem(PREFIX + ":serialInfo:" + top10[i].title + ":" + top10[i].id + ":" + top10[i].link, "directory", {
+                title: top10[i].title
             });
         }
 
-        page.appendItem("", "directory", {
-            // FIXME: icon is not applied
-            //icon: "watched.svg",
-            title: "More..."
+        page.appendItem(PREFIX + ":allSerials", "directory", {
+            title: "Show all..."
         });
     }
 
+    function populateAll(page) {
+        // sorting should be added to this page
+        page.metadata.title = "All serials (by name)";
+        page.model.contents = "list";
+        page.type = "directory";
 
-var iso8601DurationRegex = /(-)?P(?:([\.,\d]+)Y)?(?:([\.,\d]+)M)?(?:([\.,\d]+)W)?(?:([\.,\d]+)D)?T(?:([\.,\d]+)H)?(?:([\.,\d]+)M)?(?:([\.,\d]+)S)?/;
+        var offset = 0;
 
-function parseISO8601Duration(s) {
-  var m = s.match(iso8601DurationRegex);
+        (page.asyncPaginator = function() {
+            page.loading = true;
+            var serials = getSerialList(offset, 2, 0);
 
-  return (m[8] === undefined ? 0 : m[8]) * 1 +
-    (m[7] === undefined ? 0 : m[7]) * 60 +
-    (m[6] === undefined ? 0 : m[6]) * 3600 +
-    (m[5] === undefined ? 0 : m[5]) * 86400;
-};
+            if (serials.length == 0) {
+                page.loading = false;
+                page.haveMore(false);
+                return;
+            } else {
+                offset += serials.length;
+            }
+
+            for (var i = 0; i < serials.length; ++i) {
+                page.appendItem(PREFIX + ":serialInfo:" + serials[i].title + ":" + serials[i].id + ":" + serials[i].link, "directory", {
+                    title: serials[i].title
+                });
+            }
+
+            page.loading = false;
+            page.haveMore(true);
+        })();
+    }
+
+    function getSerialList(o, s, t) {
+        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'serial',
+                'type': 'search',
+                'o': o || '0',
+                's': s || '1',
+                't': t || '0'
+            }
+        });
+        return showtime.JSONDecode(response.toString()).data;
+    }
+
+    function getWatched(serialID) {
+        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'serial',
+                'type': 'getmarks',
+                'id': serialID
+            }
+        });
+        // showtime.print(response.toString());
+        var responseObj = showtime.JSONDecode(response.toString());
+        return responseObj.data || [];
+    }
 
     function serialInfo(page, serialName, serialID, url) {
         page.metadata.logo = LOGO;
@@ -194,26 +222,9 @@ function parseISO8601Duration(s) {
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/serial.view";
         page.loading = true;
-/*
-        // get watched series
-        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
-            debug: true,
-            postdata: {
-                'act': "serial",
-                'type': "getmark",
-                'id': serialID
-            },
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Referer': url,
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'http://delta.lostfilm.tv'
-            }
-        });
 
-        showtime.print("LOSTFILM WATCHED");
-        showtime.print(showtime.JSONDecode(response));
-*/
+        var watchedSeries = getWatched(serialID);
+
         var response = showtime.httpReq("http://delta.lostfilm.tv/" + url + "/seasons/");
         var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
         for (var i = 0; i < seasonsList.length; ++i) {
@@ -227,19 +238,19 @@ function parseISO8601Duration(s) {
                 if (seasonSeries[j].attributes.length > 0) {
                     continue;
                 }
-                var watched = seasonSeries[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("class").value;
+                var dataCode = seasonSeries[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("data-code").value;
                 var serieDiv = seasonSeries[j].getElementByClassName(["gamma"])[0].children[0];
                 var serieDirtyName = serieDiv.textContent.trim();
                 var serieNativeName = serieDiv.getElementByTagName("span")[0].textContent;
                 var serieNumber = seasonSeries.length - j;
                 var serieName = serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
 
-                showtime.print("LOSTFILM serie " + serieName + ": " + watched);
+                // showtime.print("LOSTFILM serie " + serieName + ": " + dataCode);
 
                 var serieAttrs = seasonSeries[j].getElementByClassName(["zeta"])[0].children[0].attributes.getNamedItem("onclick")["value"].replace("PlayEpisode('", "").replace("')", "").split("','");
                 page.appendItem(PREFIX + ":torrent:" + serieName + ":" + serieAttrs[0] + ":" + serieAttrs[1] + ":" + serieAttrs[2], "video", {
                     title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName),
-                    watched: false
+                    watched: watchedSeries.indexOf(dataCode) >= 0
                 });
             }
         }
