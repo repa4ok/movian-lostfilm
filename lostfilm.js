@@ -6,7 +6,7 @@
     var LOGO = Plugin.path + "logo.png";
 
     var service = require("showtime/service");
-    var http = require("showtime/http");
+    var http = require("./http");
     var html = require("showtime/html");
 
     service.create(TITLE, PREFIX + ":start", "video", true, LOGO);
@@ -19,10 +19,10 @@
 
     plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*):(.*)", function (page, serieName, c, s, e) {
         page.loading = true;
-
+        
         var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
-        response = showtime.httpReq(torrentsUrl);
+        var response = http.request(torrentsUrl)
 
         var foundTorrents = {
             "sd": undefined,
@@ -133,13 +133,14 @@
             title: "Favorites"
         });
 
-        var favorite = getSerialList(0, 2, 99);
-        for (var i = 0; i < favorite.length; ++i) {
-            page.appendItem(PREFIX + ":serialInfo:" + favorite[i].title + ":" + favorite[i].id + ":" + favorite[i].link, "directory", {
-                title: favorite[i].title
-            });
+        if (favorite = getSerialList(0, 2, 99)) {
+            for (var i = 0; i < favorite.length; ++i) {
+                page.appendItem(PREFIX + ":serialInfo:" + favorite[i].title + ":" + favorite[i].id + ":" + favorite[i].link, "directory", {
+                    title: favorite[i].title
+                });
+            }
         }
-
+        
         page.appendItem("", "separator", {
             title: "Popular"
         });
