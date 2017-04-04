@@ -1,0 +1,57 @@
+#define STAR_FULL() {
+  widget(icon, {
+    color: [1, 1, 0.5];
+    source: "dataroot://res/svg/Star.svg";
+  });
+}
+
+#define STAR_DIMMED() {
+  widget(icon, {
+    color: [0.33, 0.33, 0.16];
+    source: "dataroot://res/svg/Star.svg";
+  });
+}
+
+delta($parentview.expanded, !isPreloaded());
+
+widget(container_y, {
+  width: $ui.width / 2;
+  margin: [0.5em, 3.5em, 0.5em, 0];
+  spacing: 0.5em;
+
+  widget(image, {
+    aspectConstraint: true;
+    source: $self.metadata.icon;
+  });
+
+  widget(container_x, {
+    hidden: isVoid($self.metadata.rating);
+    widget(container_z, {
+      widget(container_x, {
+        STAR_DIMMED();
+        STAR_DIMMED();
+        STAR_DIMMED();
+        STAR_DIMMED();
+        STAR_DIMMED();
+      });
+      widget(clip, {
+        right: 1 - $self.metadata.rating / 100;
+        widget(container_x, {
+          STAR_FULL();
+          STAR_FULL();
+          STAR_FULL();
+          STAR_FULL();
+          STAR_FULL();
+        });
+      });
+    });
+    space(1);
+  });
+
+  widget(label, {
+    autohide: true;
+    caption: $self.metadata.description;
+    maxlines: 20;
+  });
+});
+

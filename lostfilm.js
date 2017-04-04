@@ -2,8 +2,8 @@
     var PREFIX = plugin.getDescriptor().id;
     var TITLE = plugin.getDescriptor().title;
     var SYNOPSIS = plugin.getDescriptor().synopsis;
-    var BASE_URL = "http://delta.lostfilm.tv";
-    var LOGO = Plugin.path + "logo.png";
+    var LOGO = plugin.path + "logo.png";
+    var BASE_URL = "http://www.lostfilm.tv/";
 
     var service = require("showtime/service");
     var http = require("./http");
@@ -13,14 +13,18 @@
 
     var store = plugin.createStore("config", true);
 
+    plugin.search = true;
+    plugin.addSearcher(TITLE, LOGO, search)
     plugin.addURI(PREFIX + ":start", start);
-    plugin.addURI(PREFIX + ":allSerials", populateAll);
+    plugin.addURI(PREFIX + ":allSerials:(.*):(.*):(.*)", populateAll);
     plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
-
-    plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*):(.*)", function (page, serieName, c, s, e) {
+    plugin.addURI(PREFIX + ":torrent:(.*):(.*)", function (page, serieName, dataCode) {
         page.loading = true;
-        
-        var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
+        var attributes = dataCode.split('-');
+        var c = attributes[0];
+        var s = attributes[1];
+        var e = attributes[2];
+        var response = showtime.httpReq(BASE_URL + "v_search.php?c=" + c + "&s=" + s + "&e=" + e);
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         var response = http.request(torrentsUrl)
 
@@ -68,12 +72,16 @@
             return;
         }
 
-        var x = http.request(desiredUrl);
-        page.loading = false;
+        // set watched if it wasn't before
+        var watchedSeries = getWatched(attributes[0]);
+        if (watchedSeries.indexOf(dataCode) < 0) {
+            toggleWatched(dataCode);
+        }
 
+        page.loading = false;
         page.source = "videoparams:" + showtime.JSONEncode({
             title: serieName,
-            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + c + ":" + s + ":" + e,
+            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + dataCode,
             sources: [{
                 url: 'torrent:video:' + desiredUrl
             }]
@@ -82,13 +90,13 @@
     });
 
     function start(page) {
+        page.loading = true;
         page.metadata.logo = LOGO;
         page.metadata.title = TITLE;
+        page.type = "directory";
+        page.metadata.glwview = plugin.path + "views/main.view";
 
-        page.model.contents = "list";
-        page.loading = true;
         // need to move to separate function
-
         page.options.createMultiOpt('quality', 'Quality', [
             ['sd',  'SD', true],
             ['hd',       'HD'],
@@ -109,11 +117,9 @@
             applyCookies();
             populateMainPage(page);
         } else {
-            page.error("Login failed.");
-            return;
+            page.error("Login failed. Please check your credentials.");
         }
         
-        page.type = "directory";
         page.loading = false;
     }
 
@@ -129,37 +135,40 @@
     }
 
     function populateMainPage(page) {
-        page.appendItem("", "separator", {
-            title: "Favorites"
-        });
+        populateSerials(page, "Favorites", 2, 99);
+        populateSerials(page, "Popular", 1, 0);
+        populateSerials(page, "New", 1, 1);
+        populateSerials(page, "Filming", 1, 2);
+        populateSerials(page, "Finished", 1, 5);
+    }
 
-        if (favorite = getSerialList(0, 2, 99)) {
-            for (var i = 0; i < favorite.length; ++i) {
-                page.appendItem(PREFIX + ":serialInfo:" + favorite[i].title + ":" + favorite[i].id + ":" + favorite[i].link, "directory", {
-                    title: favorite[i].title
+    function populateSerials(page, name, s, t) {
+        var serialsList = getSerialList(0, s, t);
+        if (serialsList && serialsList.length > 0) {
+            page.appendItem("", "separator", {
+                title: name
+            });
+
+            for (var i = 0; i < serialsList.length; ++i) {
+                var serialDescription = getSerialDescription(serialsList[i].id, serialsList[i].link);
+                page.appendItem(PREFIX + ":serialInfo:" + serialsList[i].title + ":" + serialsList[i].id + ":" + serialsList[i].link, "directory", {
+                    title: serialsList[i].title,
+                    icon: "http://static.lostfilm.tv/Images/" + serialsList[i].id + "/Posters/poster.jpg",
+                    description: serialDescription,
+                    rating: serialsList[i].rating * 10.0
+                });
+            }
+
+            if (s !== 2) {
+                page.appendItem(PREFIX + ":allSerials:" + name + ":" + s + ":" + t, "directory", {
+                    title: "Show all..."
                 });
             }
         }
-        
-        page.appendItem("", "separator", {
-            title: "Popular"
-        });
-
-        var top10 = getSerialList(0, 1, 0);
-        for (var i = 0; i < top10.length; ++i) {
-            page.appendItem(PREFIX + ":serialInfo:" + top10[i].title + ":" + top10[i].id + ":" + top10[i].link, "directory", {
-                title: top10[i].title
-            });
-        }
-
-        page.appendItem(PREFIX + ":allSerials", "directory", {
-            title: "Show all..."
-        });
     }
 
-    function populateAll(page) {
-        // sorting should be added to this page
-        page.metadata.title = "All serials (by name)";
+    function populateAll(page, name, s, t) {
+        page.metadata.title = name + " (by rating)";
         page.model.contents = "list";
         page.type = "directory";
 
@@ -167,7 +176,9 @@
 
         (page.asyncPaginator = function() {
             page.loading = true;
-            var serials = getSerialList(offset, 2, 0);
+            page.type = "directory";
+            page.metadata.glwview = plugin.path + "views/main.view";
+            var serials = getSerialList(offset, s, t);
 
             if (serials.length == 0) {
                 page.loading = false;
@@ -178,8 +189,12 @@
             }
 
             for (var i = 0; i < serials.length; ++i) {
+                var serialDescription = getSerialDescription(serials[i].id, serials[i].link);
                 page.appendItem(PREFIX + ":serialInfo:" + serials[i].title + ":" + serials[i].id + ":" + serials[i].link, "directory", {
-                    title: serials[i].title
+                    title: serials[i].title,
+                    icon: "http://static.lostfilm.tv/Images/" + serials[i].id + "/Posters/poster.jpg",
+                    description: serialDescription,
+                    rating: serials[i].rating * 10.0
                 });
             }
 
@@ -188,8 +203,21 @@
         })();
     }
 
+    function getSerialDescription(serialID, serialUrl) {
+        var checkCache = plugin.cacheGet("SerialsDescriptions", serialID.toString());
+        if (checkCache && checkCache.length > 0) {
+            return checkCache;
+        }
+
+        var response = showtime.httpReq(BASE_URL + serialUrl);
+        var description = html.parse(response.toString()).root.getElementByClassName("text-block description")[0].getElementByClassName("body")[0].getElementByClassName("body")[0].textContent;
+        plugin.cachePut("SerialsDescriptions", serialID.toString(), description, 604800);
+        return description;
+    }
+
     function getSerialList(o, s, t) {
-        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
+        // s: 1=>by rating; 2=>by alphabet; 3=>by date
+        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -202,8 +230,31 @@
         return showtime.JSONDecode(response.toString()).data;
     }
 
+    // not used
+    function setFavorite(serialID, enabled) {
+        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'serial',
+                'type': 'follow',
+                'id': serialID
+            }
+        });
+    }
+
+    function toggleWatched(dataCode) {
+        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'serial',
+                'type': 'markepisode',
+                'val': dataCode
+            }
+        });
+    }
+
     function getWatched(serialID) {
-        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
+        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -211,7 +262,6 @@
                 'id': serialID
             }
         });
-        // showtime.print(response.toString());
         var responseObj = showtime.JSONDecode(response.toString());
         return responseObj.data || [];
     }
@@ -219,22 +269,33 @@
     function serialInfo(page, serialName, serialID, url) {
         page.metadata.logo = LOGO;
         page.metadata.title = serialName;
-        // page.model.contents = "list";
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/serial.view";
         page.loading = true;
 
-        var watchedSeries = getWatched(serialID);
-
-        var response = showtime.httpReq("http://delta.lostfilm.tv/" + url + "/seasons/");
+        var response = showtime.httpReq(BASE_URL + url + "/seasons/");
         var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
         for (var i = 0; i < seasonsList.length; ++i) {
+            var seasonEmpty = true;
+            var seasonSeries = seasonsList[i].getElementByTagName("tr");
+            for (var j = 0; j < seasonSeries.length; ++j) {
+                if (seasonSeries[j].attributes.length > 0) {
+                    continue;
+                } else {
+                    seasonEmpty = false;
+                    break;
+                }
+            }
+
+            if (seasonEmpty) {
+                continue;
+            }
+
             var seasonName = seasonsList[i].getElementByTagName("h2")[0].textContent;
-            showtime.print("LOSTFILM: season name: " + seasonName);
             page.appendItem("", "separator", {
                 title: seasonName
             })
-            var seasonSeries = seasonsList[i].getElementByTagName("tr");
+
             for (var j = 0; j < seasonSeries.length; ++j) {
                 if (seasonSeries[j].attributes.length > 0) {
                     continue;
@@ -246,12 +307,8 @@
                 var serieNumber = seasonSeries.length - j;
                 var serieName = serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
 
-                // showtime.print("LOSTFILM serie " + serieName + ": " + dataCode);
-
-                var serieAttrs = seasonSeries[j].getElementByClassName(["zeta"])[0].children[0].attributes.getNamedItem("onclick")["value"].replace("PlayEpisode('", "").replace("')", "").split("','");
-                page.appendItem(PREFIX + ":torrent:" + serieName + ":" + serieAttrs[0] + ":" + serieAttrs[1] + ":" + serieAttrs[2], "video", {
-                    title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName),
-                    watched: watchedSeries.indexOf(dataCode) >= 0
+                page.appendItem(PREFIX + ":torrent:" + serieName + ":" + dataCode, "video", {
+                    title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName)
                 });
             }
         }
@@ -260,16 +317,16 @@
     }
 
     function performLogin(page) {
-        var credentials = plugin.getAuthCredentials(plugin.getDescriptor().synopsis, "Login required", true);
+        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required", true);
         var response, result;
         if (credentials.rejected) return false; //rejected by user
         if (credentials) {
-            response = showtime.httpReq("http://login1.bogi.ru/login.php?referer=https://www.lostfilm.tv", {
+            response = showtime.httpReq("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
                 postdata: {
                     'login': credentials.username,
                     'password': credentials.password,
                     'module': 1,
-                    'target': 'http://lostfilm.tv',
+                    'target': BASE_URL,
                     'repage': 'user',
                     'act': 'login'
                 },
@@ -277,33 +334,26 @@
                 headers: {
                     'Upgrade-Insecure-Requests': 1,
                     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': 'http://www.lostfilm.tv',
+                    'Referer': BASE_URL,
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Cookie': ''
                 }
             });
 
-            showtime.print("LOSTFILM login (phase 1) response:");
-            showtime.print(response.toString());
-
             var bogiDom = html.parse(response.toString());
             var formAction = bogiDom.root.getElementById("b_form").attributes.getNamedItem("action");
-            showtime.print("LOSTFILM login action url: " + formAction["value"]);
 
             var inputs = bogiDom.root.getElementById("b_form").getElementByTagName("input");
             var outputs = {};
             for (var i = 0; i < inputs.length; ++i) {
-                // showtime.print("LOSTFILM login input: " + ));
                 var inputName = inputs[i].attributes.getNamedItem("name");
                 var inputValue = inputs[i].attributes.getNamedItem("value");
                 if (inputName && inputValue) {
                     var resultName = inputName["value"];
                     var resultValue = inputValue["value"];
-                    // showtime.print("LOSTFILM login input value " + i + ": [" + resultName + ":" + resultValue + "]");
                     outputs[resultName] = resultValue;
                 }
             }
-            // showtime.print("LOSTFILM postdata: " + JSON.stringify(outputs));
 
             response = showtime.httpReq(formAction["value"], {
                 postdata: outputs,
@@ -311,14 +361,13 @@
                 headers: {
                     'Upgrade-Insecure-Requests': 1,
                     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': 'http://www.lostfilm.tv',
+                    'Referer': BASE_URL,
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Cookie': ''
                 }
             });
 
-            saveUserCookie(response.multiheaders);
-            return true;
+            return saveUserCookie(response.multiheaders);
         } else {
             return false;
         }
@@ -328,11 +377,34 @@
         var cookie;
         if (!headers) return false;
         cookie = headers["Set-Cookie"];
-        showtime.print("LOSTFILM cookies...");
         if (cookie) {
             cookie.join("");
-            showtime.print(cookie);
             store.userCookie = cookie;
+            return true;
+        } else {
+            return false;
         }
+    }
+
+    function search(page, query) {
+        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'common',
+                'type': 'search',
+                'val': query
+            }
+        });
+
+        var series = showtime.JSONDecode(response.toString()).data["series"];
+        for (var i = 0; i < series.length; ++i) {
+            page.appendItem(PREFIX + ":serialInfo:" + series[i].title + ":" + series[i].id + ":" + series[i].link, "video", {
+                title: series[i].title,
+                description: series[i].title,
+                icon: "http://static.lostfilm.tv/Images/" + series[i].id + "/Posters/poster.jpg"
+            });
+        }
+
+        page.entries = series.length;
     }
 })(this);
