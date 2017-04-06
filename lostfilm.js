@@ -24,7 +24,7 @@
         var c = attributes[0];
         var s = attributes[1];
         var e = attributes[2];
-        var response = showtime.httpReq(BASE_URL + "v_search.php?c=" + c + "&s=" + s + "&e=" + e);
+        var response = http.request(BASE_URL + "v_search.php?c=" + c + "&s=" + s + "&e=" + e);
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         var response = http.request(torrentsUrl)
 
@@ -209,7 +209,7 @@
             return checkCache;
         }
 
-        var response = showtime.httpReq(BASE_URL + serialUrl);
+        var response = http.request(BASE_URL + serialUrl);
         var description = html.parse(response.toString()).root.getElementByClassName("text-block description")[0].getElementByClassName("body")[0].getElementByClassName("body")[0].textContent;
         plugin.cachePut("SerialsDescriptions", serialID.toString(), description, 604800);
         return description;
@@ -217,7 +217,7 @@
 
     function getSerialList(o, s, t) {
         // s: 1=>by rating; 2=>by alphabet; 3=>by date
-        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+        var response = http.request(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -232,7 +232,7 @@
 
     // not used
     function setFavorite(serialID, enabled) {
-        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+        var response = http.request(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -243,7 +243,7 @@
     }
 
     function toggleWatched(dataCode) {
-        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+        var response = http.request(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -254,7 +254,7 @@
     }
 
     function getWatched(serialID) {
-        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+        var response = http.request(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'serial',
@@ -273,7 +273,7 @@
         page.metadata.glwview = plugin.path + "views/serial.view";
         page.loading = true;
 
-        var response = showtime.httpReq(BASE_URL + url + "/seasons/");
+        var response = http.request(BASE_URL + url + "/seasons/");
         var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
         for (var i = 0; i < seasonsList.length; ++i) {
             var seasonEmpty = true;
@@ -321,7 +321,7 @@
         var response, result;
         if (credentials.rejected) return false; //rejected by user
         if (credentials) {
-            response = showtime.httpReq("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
+            response = http.request("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
                 postdata: {
                     'login': credentials.username,
                     'password': credentials.password,
@@ -355,7 +355,7 @@
                 }
             }
 
-            response = showtime.httpReq(formAction["value"], {
+            response = http.request(formAction["value"], {
                 postdata: outputs,
                 noFollow: true,
                 headers: {
@@ -387,7 +387,7 @@
     }
 
     function search(page, query) {
-        var response = showtime.httpReq(BASE_URL + "ajaxik.php", {
+        var response = http.request(BASE_URL + "ajaxik.php", {
             debug: true,
             postdata: {
                 'act': 'common',
