@@ -59,7 +59,6 @@ HttpResponse.prototype.toString = function() {
 
   if(string.isUtf8(this.bytes))
     // Data validates as UTF-8, return it
-    console.log(this.bytes.toString())
     return this.bytes.toString();
 
   return string.utf8FromBytes(this.bytes);
