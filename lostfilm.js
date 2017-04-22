@@ -11,7 +11,28 @@
 
     service.create(TITLE, PREFIX + ":start", "video", true, LOGO);
 
+    var authRequired = true;
     var store = plugin.createStore("config", true);
+
+    var settings = plugin.createSettings(TITLE, LOGO, SYNOPSIS);
+    settings.createBool("enableDebug", "Enabled debug output", false, function(v) { store.enableDebug = v });
+    settings.createMultiOpt('quality', 'Video quality', [
+        ['sd', 'SD'],
+        ['hd', 'HD', true],
+        ['fhd', 'Full HD']], 
+        function(v) {
+            printDebug("set quality to " + v);
+            store.quality = v;
+    });
+    settings.createDivider("Categories visibility");
+    settings.createBool("showPopular", "Popular", true, function(v) { store.showPopular = v; });
+    settings.createBool("showNew", "New", true, function(v) { store.showNew = v; });
+    settings.createBool("showFilming", "Filming", true, function(v) { store.showFilming = v; });
+    settings.createBool("showFinished", "Finished", true, function(v) { store.showFinished = v; });
+
+    function printDebug(message) {
+        if (store.enableDebug) showtime.print(message);
+    }
 
     plugin.search = true;
     plugin.addSearcher(TITLE, LOGO, search)
@@ -20,6 +41,18 @@
     plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
     plugin.addURI(PREFIX + ":torrent:(.*):(.*)", function (page, serieName, dataCode) {
         page.loading = true;
+        printDebug(PREFIX + ":torrent:" + serieName + ": " + dataCode);
+
+        if (authRequired) {
+            if (performLogin()) {
+                applyCookies();
+            } else {
+                page.loading = false;
+                page.error("Login failed. Please check your credentials.");
+                return;
+            }
+        }
+
         var attributes = dataCode.split('-');
         var c = attributes[0];
         var s = attributes[1];
@@ -55,16 +88,16 @@
         if (desiredUrl == undefined) {
             if (foundTorrents["sd"]) {
                 desiredUrl = foundTorrents["sd"];
-                showtime.print(store.quality + " torrent not found. Playing SD instead...");
+                printDebug(store.quality + " torrent not found. Playing SD instead...");
             } else if (foundTorrents["hd"]) {
                 desiredUrl = foundTorrents["hd"];
-                showtime.print(store.quality + " torrent not found. Playing HD instead....");
+                printDebug(store.quality + " torrent not found. Playing HD instead....");
             } else if (foundTorrents["fhd"]) {
                 desiredUrl = foundTorrents["fhd"];
-                showtime.print(store.quality + " torrent not found. Playing Full HD instead....");
+                printDebug(store.quality + " torrent not found. Playing Full HD instead....");
             }
         } else {
-            showtime.print(store.quality + " torrent found. Playing it...");
+            printDebug(store.quality + " torrent found. Playing it...");
         }
 
         if (desiredUrl == undefined || desiredUrl == "") {
@@ -96,35 +129,35 @@
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/main.view";
 
-        // need to move to separate function
-        page.options.createMultiOpt('quality', 'Quality', [
-            ['sd',  'SD', true],
-            ['hd',       'HD'],
-            ['fhd',      'Full HD']], 
-            function(v) {
-                store.quality = v;
-            },
-        true);
+        var loginField = store.username && store.username.length > 0 ? ("Signed as " + store.username + ". Logout?") : "Sign in";
+        page.options.createAction("username", loginField, function() {
+            if (store.username) {
+                performLogout();
+            } else {
+                if (performLogin()) {
+                    
+                } else {
+                    page.error("Login failed. Please check your credentials.");
+                    return;
+                }
+            }
 
-        if (store.quality == undefined || store.quality == "") {
-            store.quality = "sd";
-        }
+            page.redirect(PREFIX + ":start");
+        });
 
         if (checkCookies()) {
             applyCookies();
-            populateMainPage(page);
-        } else if (performLogin(page)) {
-            applyCookies();
-            populateMainPage(page);
+            authRequired = false;
         } else {
-            page.error("Login failed. Please check your credentials.");
+            authRequired = true;
         }
-        
+
+        populateMainPage(page);
         page.loading = false;
     }
 
     function checkCookies() {
-        return store.userCookie && store.userCookie != "DONT_TOUCH_THIS";
+        return store.userCookie && store.userCookie.length > 0;
     }
 
     function applyCookies() {
@@ -135,11 +168,11 @@
     }
 
     function populateMainPage(page) {
-        populateSerials(page, "Favorites", 2, 99);
-        populateSerials(page, "Popular", 1, 0);
-        populateSerials(page, "New", 1, 1);
-        populateSerials(page, "Filming", 1, 2);
-        populateSerials(page, "Finished", 1, 5);
+        if (authRequired === false) populateSerials(page, "Favorites", 2, 99);
+        if (store.showPopular) populateSerials(page, "Popular", 1, 0);
+        if (store.showNew) populateSerials(page, "New", 1, 1);
+        if (store.showFilming) populateSerials(page, "Filming", 1, 2);
+        if (store.showFinished) populateSerials(page, "Finished", 1, 5);
     }
 
     function populateSerials(page, name, s, t) {
@@ -151,7 +184,7 @@
 
             for (var i = 0; i < serialsList.length; ++i) {
                 var serialDescription = getSerialDescription(serialsList[i].id, serialsList[i].link);
-                page.appendItem(PREFIX + ":serialInfo:" + serialsList[i].title + ":" + serialsList[i].id + ":" + serialsList[i].link, "directory", {
+                var item = page.appendItem(PREFIX + ":serialInfo:" + serialsList[i].title + ":" + serialsList[i].id + ":" + serialsList[i].link, "directory", {
                     title: serialsList[i].title,
                     icon: "http://static.lostfilm.tv/Images/" + serialsList[i].id + "/Posters/poster.jpg",
                     description: serialDescription,
@@ -204,6 +237,7 @@
     }
 
     function getSerialDescription(serialID, serialUrl) {
+        printDebug("getSerialDescription(" + serialID + ", " + serialUrl + ")");
         var checkCache = plugin.cacheGet("SerialsDescriptions", serialID.toString());
         if (checkCache && checkCache.length > 0) {
             return checkCache;
@@ -216,9 +250,10 @@
     }
 
     function getSerialList(o, s, t) {
+        printDebug("getSerialList(" + o + ", " + s + ", " + t + ")");
         // s: 1=>by rating; 2=>by alphabet; 3=>by date
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'search',
@@ -233,7 +268,7 @@
     // not used
     function setFavorite(serialID, enabled) {
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'follow',
@@ -244,7 +279,7 @@
 
     function toggleWatched(dataCode) {
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'markepisode',
@@ -254,8 +289,9 @@
     }
 
     function getWatched(serialID) {
+        printDebug("getWatched(" + serialID + ")");
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'getmarks',
@@ -267,6 +303,7 @@
     }
 
     function serialInfo(page, serialName, serialID, url) {
+        printDebug("serialInfo(" + serieName + ", " + serialID + ", " + url + ")");
         page.metadata.logo = LOGO;
         page.metadata.title = serialName;
         page.type = "directory";
@@ -316,16 +353,72 @@
         page.loading = false;
     }
 
-    function performLogin(page) {
-        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required. Please use e-mail as username.", true);
-        if (credentials.rejected) return false; //rejected by user
+    function validateEmail(email) {
+        return (/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email));
+    }
+
+    function getEmailByLogin(credentials) {
+        var response = http.request("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
+            debug: store.enableDebug,
+            postdata: {
+                'login': credentials.username,
+                'password': credentials.password,
+                'module': 1,
+                'target': BASE_URL,
+                'repage': 'user',
+                'act': 'login'
+            },
+            noFollow: true,
+            headers: {
+                'Upgrade-Insecure-Requests': 1,
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
+                'Referer': BASE_URL,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Cookie': ''
+            }
+        });
+
+        var bogiDom = html.parse(response.toString());
+        var inputs = bogiDom.root.getElementById("b_form").getElementByTagName("input");
+        var email = "";
+        for (var i = 0; i < inputs.length; ++i) {
+            var inputName = inputs[i].attributes.getNamedItem("name").value;
+            var inputValue = inputs[i].attributes.getNamedItem("value").value;
+            if (inputName === "email") {
+                email = inputValue;
+                break;
+            }
+        }
+
+        return email;
+    }
+
+    function performLogin() {
+        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", true);
+        if (credentials.rejected) {
+            printDebug("performLogin(): credentials.rejected");
+            return false; //rejected by user
+        }
         if (credentials) {
+            var username = credentials.username;
+
+            if (!validateEmail(credentials)) {
+                // old auth method
+                printDebug("performLogin(): old auth method");
+                username = getEmailByLogin(credentials);
+                if (username.length <= 0) {
+                    // failed to get email
+                    printDebug("performLogin(): old auth method: failed to get email by username");
+                    return false;
+                }
+            }
+
             var response = http.request(BASE_URL + "ajaxik.php", {
-                debug: true,
+                debug: store.enableDebug,
                 postdata: {
                     'act': 'users',
                     'type': 'login',
-                    'mail': credentials.username,
+                    'mail': username,
                     'pass': credentials.password,
                     'rem': 1
                 },
@@ -335,10 +428,36 @@
                 }
             });
 
-            return saveUserCookie(response.multiheaders);
+            var responseObj = showtime.JSONDecode(response.toString());
+
+            if (!responseObj || !responseObj.success) {
+                printDebug("performLogin(): !responseObj && !responseObj.success");
+                return false;
+            }
+
+            store.username = responseObj.name;
+
+            if (saveUserCookie(response.multiheaders)) {
+                applyCookies();
+                return true;
+            }
         }
 
         return false;
+    }
+
+    function performLogout() {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
+            postdata: {
+                'act': 'users',
+                'type': 'logout'
+            }
+        });
+        store.userCookie = "";
+        applyCookies();
+        store.username = undefined;
+        authRequired = true;
     }
 
     function saveUserCookie(headers) {
@@ -349,14 +468,13 @@
             cookie.join("");
             store.userCookie = cookie;
             return true;
-        } else {
-            return false;
         }
+        return false;
     }
 
     function search(page, query) {
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'common',
                 'type': 'search',
