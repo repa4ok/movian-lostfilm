@@ -44,11 +44,10 @@
         printDebug(PREFIX + ":torrent:" + serieName + ": " + dataCode);
 
         if (authRequired) {
-            if (performLogin()) {
-                applyCookies();
-            } else {
+            var sl = performLogin();
+            if (sl.length > 0) {
                 page.loading = false;
-                page.error("Login failed. Please check your credentials.");
+                page.error(sl);
                 return;
             }
         }
@@ -134,10 +133,9 @@
             if (store.username) {
                 performLogout();
             } else {
-                if (performLogin()) {
-                    
-                } else {
-                    page.error("Login failed. Please check your credentials.");
+                var sl = performLogin();
+                if (sl.length > 0) {
+                    page.error(sl);
                     return;
                 }
             }
@@ -303,7 +301,7 @@
     }
 
     function serialInfo(page, serialName, serialID, url) {
-        printDebug("serialInfo(" + serieName + ", " + serialID + ", " + url + ")");
+        printDebug("serialInfo(" + serialName + ", " + serialID + ", " + url + ")");
         page.metadata.logo = LOGO;
         page.metadata.title = serialName;
         page.type = "directory";
@@ -311,7 +309,21 @@
         page.loading = true;
 
         var response = http.request(BASE_URL + url + "/seasons/");
-        var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
+        var rootObj = html.parse(response.toString()).root;
+
+        // OMG how dirty...
+        // postponed due to main page not updated
+        /*
+        var isFavorite = rootObj.getElementByClassName("favorites-btn").toString().length;
+        page.options.createBool(serialID + "_fav", "Favorite", isFavorite, function(v) {
+            if (v != isFavorite) {
+                setFavorite(serialID, v);
+                page.redirect(PREFIX + ":serialInfo:" + serialName + ":" + serialID + ":" + url);
+            }
+        });
+        */
+
+        var seasonsList = rootObj.getElementByClassName("serie-block");
         for (var i = 0; i < seasonsList.length; ++i) {
             var seasonEmpty = true;
             var seasonSeries = seasonsList[i].getElementByTagName("tr");
@@ -378,9 +390,20 @@
             }
         });
 
-        var bogiDom = html.parse(response.toString());
-        var inputs = bogiDom.root.getElementById("b_form").getElementByTagName("input");
         var email = "";
+
+        var bogiDom = html.parse(response.toString());
+        var b_form = bogiDom.root.getElementById("b_form");
+        if (!b_form) {
+            return email;
+        }
+
+        var inputs = b_form.getElementByTagName("input");
+
+        if (!inputs) {
+            return email;
+        }
+
         for (var i = 0; i < inputs.length; ++i) {
             var inputName = inputs[i].attributes.getNamedItem("name").value;
             var inputValue = inputs[i].attributes.getNamedItem("value").value;
@@ -397,19 +420,19 @@
         var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", true);
         if (credentials.rejected) {
             printDebug("performLogin(): credentials.rejected");
-            return false; //rejected by user
+            return "Rejected by user"; //rejected by user
         }
         if (credentials) {
             var username = credentials.username;
 
-            if (!validateEmail(credentials)) {
+            if (!validateEmail(username)) {
                 // old auth method
                 printDebug("performLogin(): old auth method");
                 username = getEmailByLogin(credentials);
                 if (username.length <= 0) {
                     // failed to get email
                     printDebug("performLogin(): old auth method: failed to get email by username");
-                    return false;
+                    return "Failed to get email by username. Please use email as username";
                 }
             }
 
@@ -432,18 +455,18 @@
 
             if (!responseObj || !responseObj.success) {
                 printDebug("performLogin(): !responseObj && !responseObj.success");
-                return false;
+                return "Login was unsuccessfull, please try again";
             }
 
             store.username = responseObj.name;
 
             if (saveUserCookie(response.multiheaders)) {
                 applyCookies();
-                return true;
+                return "";
             }
         }
 
-        return false;
+        return "Ooops. Something goes wrong.";
     }
 
     function performLogout() {
