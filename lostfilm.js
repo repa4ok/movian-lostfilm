@@ -317,60 +317,28 @@
     }
 
     function performLogin(page) {
-        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required", true);
-        var response, result;
+        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required. Please use e-mail as username.", true);
         if (credentials.rejected) return false; //rejected by user
         if (credentials) {
-            response = http.request("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
+            var response = http.request(BASE_URL + "ajaxik.php", {
+                debug: true,
                 postdata: {
-                    'login': credentials.username,
-                    'password': credentials.password,
-                    'module': 1,
-                    'target': BASE_URL,
-                    'repage': 'user',
-                    'act': 'login'
+                    'act': 'users',
+                    'type': 'login',
+                    'mail': credentials.username,
+                    'pass': credentials.password,
+                    'rem': 1
                 },
-                noFollow: true,
                 headers: {
-                    'Upgrade-Insecure-Requests': 1,
                     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': BASE_URL,
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cookie': ''
-                }
-            });
-
-            var bogiDom = html.parse(response.toString());
-            var formAction = bogiDom.root.getElementById("b_form").attributes.getNamedItem("action");
-
-            var inputs = bogiDom.root.getElementById("b_form").getElementByTagName("input");
-            var outputs = {};
-            for (var i = 0; i < inputs.length; ++i) {
-                var inputName = inputs[i].attributes.getNamedItem("name");
-                var inputValue = inputs[i].attributes.getNamedItem("value");
-                if (inputName && inputValue) {
-                    var resultName = inputName["value"];
-                    var resultValue = inputValue["value"];
-                    outputs[resultName] = resultValue;
-                }
-            }
-
-            response = http.request(formAction["value"], {
-                postdata: outputs,
-                noFollow: true,
-                headers: {
-                    'Upgrade-Insecure-Requests': 1,
-                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': BASE_URL,
-                    'Content-Type': 'application/x-www-form-urlencoded',
                     'Cookie': ''
                 }
             });
 
             return saveUserCookie(response.multiheaders);
-        } else {
-            return false;
         }
+
+        return false;
     }
 
     function saveUserCookie(headers) {
