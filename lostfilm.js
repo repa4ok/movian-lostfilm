@@ -1,6 +1,7 @@
 (function(plugin) {
     var PREFIX = plugin.getDescriptor().id;
     var TITLE = plugin.getDescriptor().title;
+    var VERSION = plugin.getDescriptor().version;
     var SYNOPSIS = plugin.getDescriptor().synopsis;
     var LOGO = plugin.path + "logo.png";
     var BASE_URL = "http://www.lostfilm.tv/";
@@ -15,7 +16,7 @@
     var store = plugin.createStore("config", true);
 
     var settings = plugin.createSettings(TITLE, LOGO, SYNOPSIS);
-    settings.createBool("enableDebug", "Enabled debug output", false, function(v) { store.enableDebug = v });
+    settings.createBool("enableDebug", "Debug output", true, function(v) { store.enableDebug = v });
     settings.createMultiOpt('quality', 'Video quality', [
         ['sd', 'SD'],
         ['hd', 'HD', true],
@@ -71,7 +72,6 @@
             var currentTorrent = torrentArr[i];
             var currentTorrentLabel = currentTorrent.getElementByClassName("inner-box--label")[0].textContent.trim().toLowerCase();
             var currentTorrentLink = currentTorrent.getElementByClassName("inner-box--link main")[0].children[0].attributes.getNamedItem("href").value;
-            showtime.print("found torrent " + currentTorrentLabel + ". url = " + currentTorrentLink);
 
             if (currentTorrentLabel == "sd") {
                 foundTorrents["sd"] = currentTorrentLink;
@@ -123,6 +123,7 @@
 
     function start(page) {
         page.loading = true;
+
         page.metadata.logo = LOGO;
         page.metadata.title = TITLE;
         page.type = "directory";
@@ -462,6 +463,7 @@
 
             if (saveUserCookie(response.multiheaders)) {
                 applyCookies();
+                authRequired = false;
                 return "";
             }
         }
