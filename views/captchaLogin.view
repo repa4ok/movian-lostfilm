@@ -23,14 +23,14 @@ widget(container_z, {
         clipBlur: 1;
 
         cloner($self.model.nodes, loader, {
-          onEvent(copy, deliverRef($core.clipboard.setFromItem, $self));
+          //onEvent(copy, deliverRef($core.clipboard.setFromItem, $self));
           selectOnFocus: true;
           selectOnHover: true;
           time: 0.1;
           effect: blend;
           noInitialTransform: true;
-          //alt: "skin://items/list/default.view";
-          source: select($self.type == "video", "episode.view", "skin://items/list/" + $self.type + ".view");
+          source: select(($self.type == "customString" || $self.type == "customImage"), $self.type + ".view", "skin://items/list/" + $self.type + ".view");
+          alt: "skin://items/list/default.view";
         });
 
         widget(loader, {

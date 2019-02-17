@@ -1,9 +1,10 @@
 (function(plugin) {
     var PREFIX = plugin.getDescriptor().id;
     var TITLE = plugin.getDescriptor().title;
+    var VERSION = plugin.getDescriptor().version;
     var SYNOPSIS = plugin.getDescriptor().synopsis;
-    var BASE_URL = "http://delta.lostfilm.tv";
-    var LOGO = Plugin.path + "logo.png";
+    var LOGO = plugin.path + "logo.png";
+    var BASE_URL = "http://www.lostfilm.tv/";
 
     var service = require("showtime/service");
     var http = require("./http");
@@ -11,18 +12,75 @@
 
     service.create(TITLE, PREFIX + ":start", "video", true, LOGO);
 
+    var authRequired = true;
+    var authChecked = false;
     var store = plugin.createStore("config", true);
 
-    plugin.addURI(PREFIX + ":start", start);
-    plugin.addURI(PREFIX + ":allSerials", populateAll);
-    plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
+    var settings = plugin.createSettings(TITLE, LOGO, SYNOPSIS);
+    settings.createBool("enableDebug", "Debug output", true, function(v) { store.enableDebug = v });
+    settings.createMultiOpt('quality', 'Video quality', [
+        ['sd', 'SD'],
+        ['hd', 'HD', true],
+        ['fhd', 'Full HD']], 
+        function(v) {
+            printDebug("set quality to " + v);
+            store.quality = v;
+    });
+    settings.createMultiOpt("sorting", "Series sorting", [
+        ["desc", "Descending", store.sorting === "desc"],
+        ["asc", "Ascending", store.sorting === "asc"]],
+        function(v) {
+            if (store.sorting != v) {
+                printDebug("set sorting to " + v);
+                store.sorting = v;
+            }
+    });
+    settings.createDivider("Categories visibility");
+    settings.createBool("showPopular", "Popular", true, function(v) { store.showPopular = v; });
+    settings.createBool("showNew", "New", true, function(v) { store.showNew = v; });
+    settings.createBool("showFilming", "Filming", true, function(v) { store.showFilming = v; });
+    settings.createBool("showFinished", "Finished", true, function(v) { store.showFinished = v; });
 
-    plugin.addURI(PREFIX + ":torrent:(.*):(.*):(.*):(.*)", function (page, serieName, c, s, e) {
+    function printDebug(message) {
+        if (store.enableDebug) showtime.print(message);
+    }
+
+    plugin.search = true;
+    plugin.addSearcher(TITLE, LOGO, search)
+    plugin.addURI(PREFIX + ":start", start);
+    plugin.addURI(PREFIX + ":performCaptchaLogin:(.*):(.*)", performCaptchaLogin);
+    plugin.addURI(PREFIX + ":allSerials:(.*):(.*):(.*)", populateAll);
+    plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
+    plugin.addURI(PREFIX + ":torrent:(.*):(.*)", function (page, serieName, dataCode) {
         page.loading = true;
-        
-        var response = showtime.httpReq("http://delta.lostfilm.tv/v_search.php?c=" + c + "&s=" + s + "&e=" + e);
+        printDebug(PREFIX + ":torrent:" + serieName + ":" + dataCode);
+
+        if (authRequired) {
+            authRequired = performLogin(page) == false;
+            if (authRequired) {
+                page.loading = false;
+                page.error("Login failed. Please go back and try again.");
+                return;
+            }
+        }
+
+        var attributes = dataCode.split('-');
+        var c = attributes[0];
+        var s = attributes[1];
+        var e = attributes[2];
+        var response = http.request(BASE_URL + "v_search.php?c=" + c + "&s=" + s + "&e=" + e, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
-        var response = http.request(torrentsUrl)
+        var response = http.request(torrentsUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        })
 
         var foundTorrents = {
             "sd": undefined,
@@ -35,7 +93,6 @@
             var currentTorrent = torrentArr[i];
             var currentTorrentLabel = currentTorrent.getElementByClassName("inner-box--label")[0].textContent.trim().toLowerCase();
             var currentTorrentLink = currentTorrent.getElementByClassName("inner-box--link main")[0].children[0].attributes.getNamedItem("href").value;
-            showtime.print("found torrent " + currentTorrentLabel + ". url = " + currentTorrentLink);
 
             if (currentTorrentLabel == "sd") {
                 foundTorrents["sd"] = currentTorrentLink;
@@ -51,16 +108,16 @@
         if (desiredUrl == undefined) {
             if (foundTorrents["sd"]) {
                 desiredUrl = foundTorrents["sd"];
-                showtime.print(store.quality + " torrent not found. Playing SD instead...");
+                printDebug(store.quality + " torrent not found. Playing SD instead...");
             } else if (foundTorrents["hd"]) {
                 desiredUrl = foundTorrents["hd"];
-                showtime.print(store.quality + " torrent not found. Playing HD instead....");
+                printDebug(store.quality + " torrent not found. Playing HD instead....");
             } else if (foundTorrents["fhd"]) {
                 desiredUrl = foundTorrents["fhd"];
-                showtime.print(store.quality + " torrent not found. Playing Full HD instead....");
+                printDebug(store.quality + " torrent not found. Playing Full HD instead....");
             }
         } else {
-            showtime.print(store.quality + " torrent found. Playing it...");
+            printDebug(store.quality + " torrent found. Playing it...");
         }
 
         if (desiredUrl == undefined || desiredUrl == "") {
@@ -68,12 +125,18 @@
             return;
         }
 
-        var x = http.request(desiredUrl);
-        page.loading = false;
+        // set watched if it wasn't before
+        var watchedSeries = getWatched(attributes[0]);
+        if (watchedSeries.indexOf(dataCode) < 0) {
+            toggleWatched(dataCode);
+        }
 
+        printDebug("[LOGME] desiredUrl => " + 'torrent:video:' + desiredUrl)
+
+        page.loading = false;
         page.source = "videoparams:" + showtime.JSONEncode({
             title: serieName,
-            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + c + ":" + s + ":" + e,
+            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + dataCode,
             sources: [{
                 url: 'torrent:video:' + desiredUrl
             }]
@@ -82,84 +145,65 @@
     });
 
     function start(page) {
+        page.loading = true;
+
         page.metadata.logo = LOGO;
         page.metadata.title = TITLE;
-
-        page.model.contents = "list";
-        page.loading = true;
-        // need to move to separate function
-
-        page.options.createMultiOpt('quality', 'Quality', [
-            ['sd',  'SD', true],
-            ['hd',       'HD'],
-            ['fhd',      'Full HD']], 
-            function(v) {
-                store.quality = v;
-            },
-        true);
-
-        if (store.quality == undefined || store.quality == "") {
-            store.quality = "sd";
-        }
-
-        if (checkCookies()) {
-            applyCookies();
-            populateMainPage(page);
-        } else if (performLogin(page)) {
-            applyCookies();
-            populateMainPage(page);
-        } else {
-            page.error("Login failed.");
-            return;
-        }
-        
         page.type = "directory";
+        page.metadata.glwview = plugin.path + "views/main.view";
+
+        var loginField = store.username && store.username.length > 0 ? ("Signed as " + store.username + ". Logout?") : "Sign in";
+        page.options.createAction("username", loginField, function() {
+            if (store.username) {
+                performLogout();
+            } else {
+                authRequired = performLogin(page) == false;
+            }
+
+            page.redirect(PREFIX + ":start");
+        });
+
+        checkAuthOnce(page);
+
+        populateMainPage(page);
         page.loading = false;
     }
 
-    function checkCookies() {
-        return store.userCookie && store.userCookie != "DONT_TOUCH_THIS";
-    }
-
-    function applyCookies() {
-        plugin.addHTTPAuth("http://.*\\.lostfilm\\.tv", function(req) {
-            req.setHeader("Cookie", store.userCookie);
-            req.setHeader('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0');
-        });
-    }
-
     function populateMainPage(page) {
-        page.appendItem("", "separator", {
-            title: "Favorites"
-        });
+        if (authRequired === false) populateSerials(page, "Favorites", 2, 99);
+        if (store.showPopular) populateSerials(page, "Popular", 1, 0);
+        if (store.showNew) populateSerials(page, "New", 1, 1);
+        if (store.showFilming) populateSerials(page, "Filming", 1, 2);
+        if (store.showFinished) populateSerials(page, "Finished", 1, 5);
+    }
 
-        if (favorite = getSerialList(0, 2, 99)) {
-            for (var i = 0; i < favorite.length; ++i) {
-                page.appendItem(PREFIX + ":serialInfo:" + favorite[i].title + ":" + favorite[i].id + ":" + favorite[i].link, "directory", {
-                    title: favorite[i].title
+    function populateSerials(page, name, s, t) {
+        var serialsList = getSerialList(0, s, t);
+        if (serialsList && serialsList.length > 0) {
+            page.appendItem("", "separator", {
+                title: name
+            });
+
+            for (var i = 0; i < serialsList.length; ++i) {
+                var serialDescription = getSerialDescription(serialsList[i].id, serialsList[i].link);
+                var item = page.appendItem(PREFIX + ":serialInfo:" + serialsList[i].title + ":" + serialsList[i].id + ":" + serialsList[i].link, "directory", {
+                    title: serialsList[i].title,
+                    icon: "http://static.lostfilm.tv/Images/" + serialsList[i].id + "/Posters/poster.jpg",
+                    description: serialDescription,
+                    rating: serialsList[i].rating * 10.0
+                });
+            }
+
+            if (s !== 2) {
+                page.appendItem(PREFIX + ":allSerials:" + name + ":" + s + ":" + t, "directory", {
+                    title: "Show all..."
                 });
             }
         }
-        
-        page.appendItem("", "separator", {
-            title: "Popular"
-        });
-
-        var top10 = getSerialList(0, 1, 0);
-        for (var i = 0; i < top10.length; ++i) {
-            page.appendItem(PREFIX + ":serialInfo:" + top10[i].title + ":" + top10[i].id + ":" + top10[i].link, "directory", {
-                title: top10[i].title
-            });
-        }
-
-        page.appendItem(PREFIX + ":allSerials", "directory", {
-            title: "Show all..."
-        });
     }
 
-    function populateAll(page) {
-        // sorting should be added to this page
-        page.metadata.title = "All serials (by name)";
+    function populateAll(page, name, s, t) {
+        page.metadata.title = name + " (by rating)";
         page.model.contents = "list";
         page.type = "directory";
 
@@ -167,7 +211,9 @@
 
         (page.asyncPaginator = function() {
             page.loading = true;
-            var serials = getSerialList(offset, 2, 0);
+            page.type = "directory";
+            page.metadata.glwview = plugin.path + "views/main.view";
+            var serials = getSerialList(offset, s, t);
 
             if (serials.length == 0) {
                 page.loading = false;
@@ -178,8 +224,12 @@
             }
 
             for (var i = 0; i < serials.length; ++i) {
+                var serialDescription = getSerialDescription(serials[i].id, serials[i].link);
                 page.appendItem(PREFIX + ":serialInfo:" + serials[i].title + ":" + serials[i].id + ":" + serials[i].link, "directory", {
-                    title: serials[i].title
+                    title: serials[i].title,
+                    icon: "http://static.lostfilm.tv/Images/" + serials[i].id + "/Posters/poster.jpg",
+                    description: serialDescription,
+                    rating: serials[i].rating * 10.0
                 });
             }
 
@@ -188,70 +238,172 @@
         })();
     }
 
+    function getSerialDescription(serialID, serialUrl) {
+        printDebug("getSerialDescription(" + serialID + ", " + serialUrl + ")");
+        var checkCache = plugin.cacheGet("SerialsDescriptions", serialID.toString());
+        if (checkCache && checkCache.length > 0) {
+            return checkCache;
+        }
+
+        var response = http.request(BASE_URL + serialUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+        var description = html.parse(response.toString()).root.getElementByClassName("text-block description")[0].getElementByClassName("body")[0].getElementByClassName("body")[0].textContent;
+        plugin.cachePut("SerialsDescriptions", serialID.toString(), description, 604800);
+        return description;
+    }
+
     function getSerialList(o, s, t) {
-        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
-            debug: true,
+        printDebug("getSerialList(" + o + ", " + s + ", " + t + ")");
+        // s: 1=>by rating; 2=>by alphabet; 3=>by date
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'search',
                 'o': o || '0',
                 's': s || '1',
                 't': t || '0'
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
             }
         });
         return showtime.JSONDecode(response.toString()).data;
     }
 
+    // not used
+    function setFavorite(serialID, enabled) {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
+            postdata: {
+                'act': 'serial',
+                'type': 'follow',
+                'id': serialID
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+    }
+
+    function toggleWatched(dataCode) {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
+            postdata: {
+                'act': 'serial',
+                'type': 'markepisode',
+                'val': dataCode
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+    }
+
     function getWatched(serialID) {
-        var response = showtime.httpReq("http://delta.lostfilm.tv/ajaxik.php", {
-            debug: true,
+        printDebug("getWatched(" + serialID + ")");
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
             postdata: {
                 'act': 'serial',
                 'type': 'getmarks',
                 'id': serialID
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
             }
         });
-        // showtime.print(response.toString());
         var responseObj = showtime.JSONDecode(response.toString());
         return responseObj.data || [];
     }
 
     function serialInfo(page, serialName, serialID, url) {
+        printDebug("serialInfo(" + serialName + ", " + serialID + ", " + url + ")");
         page.metadata.logo = LOGO;
         page.metadata.title = serialName;
-        // page.model.contents = "list";
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/serial.view";
         page.loading = true;
 
-        var watchedSeries = getWatched(serialID);
+        var response = http.request(BASE_URL + url + "/seasons/", {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+        var rootObj = html.parse(response.toString()).root;
 
-        var response = showtime.httpReq("http://delta.lostfilm.tv/" + url + "/seasons/");
-        var seasonsList = html.parse(response.toString()).root.getElementByClassName("serie-block");
+        // OMG how dirty...
+        // postponed due to main page not updated
+        /*
+        var isFavorite = rootObj.getElementByClassName("favorites-btn").toString().length;
+        page.options.createBool(serialID + "_fav", "Favorite", isFavorite, function(v) {
+            if (v != isFavorite) {
+                setFavorite(serialID, v);
+                page.redirect(PREFIX + ":serialInfo:" + serialName + ":" + serialID + ":" + url);
+            }
+        });
+        */
+
+        var seasonsList = rootObj.getElementByClassName("serie-block");
+        var seasonsMap = [];
         for (var i = 0; i < seasonsList.length; ++i) {
-            var seasonName = seasonsList[i].getElementByTagName("h2")[0].textContent;
-            showtime.print("LOSTFILM: season name: " + seasonName);
-            page.appendItem("", "separator", {
-                title: seasonName
-            })
+            var seasonEmpty = true;
             var seasonSeries = seasonsList[i].getElementByTagName("tr");
             for (var j = 0; j < seasonSeries.length; ++j) {
                 if (seasonSeries[j].attributes.length > 0) {
                     continue;
+                } else {
+                    seasonEmpty = false;
+                    break;
                 }
-                var dataCode = seasonSeries[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("data-code").value;
-                var serieDiv = seasonSeries[j].getElementByClassName(["gamma"])[0].children[0];
+            }
+
+            if (seasonEmpty) {
+                continue;
+            }
+
+            var seasonName = seasonsList[i].getElementByTagName("h2")[0].textContent;
+            seasonsMap.push({name: seasonName, series: seasonSeries});
+        }
+
+        if (store.sorting === "asc") {
+            seasonsMap.reverse();
+        }
+
+        for (var i = 0; i < seasonsMap.length; ++i) {
+            var season = seasonsMap[i];
+            
+            page.appendItem("", "separator", {
+                title: season.name
+            });
+
+            var seriesList = season.series;
+            if (store.sorting === "asc") {
+                seriesList.reverse();
+            }
+
+            for (var j = 0; j < seriesList.length; ++j) {
+                if (seriesList[j].attributes.length > 0) {
+                    continue;
+                }
+                var dataCode = seriesList[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("data-code").value;
+                var serieDiv = seriesList[j].getElementByClassName(["gamma"])[0].children[0];
                 var serieDirtyName = serieDiv.textContent.trim();
                 var serieNativeName = serieDiv.getElementByTagName("span")[0].textContent;
-                var serieNumber = seasonSeries.length - j;
+                var serieNumber = store.sorting === "asc" ? j : seriesList.length - j;
                 var serieName = serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
 
-                // showtime.print("LOSTFILM serie " + serieName + ": " + dataCode);
-
-                var serieAttrs = seasonSeries[j].getElementByClassName(["zeta"])[0].children[0].attributes.getNamedItem("onclick")["value"].replace("PlayEpisode('", "").replace("')", "").split("','");
-                page.appendItem(PREFIX + ":torrent:" + serieName + ":" + serieAttrs[0] + ":" + serieAttrs[1] + ":" + serieAttrs[2], "video", {
-                    title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName),
-                    watched: watchedSeries.indexOf(dataCode) >= 0
+                page.appendItem(PREFIX + ":torrent:" + serieName + ":" + dataCode, "video", {
+                    title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName)
                 });
             }
         }
@@ -259,80 +411,248 @@
         page.loading = false;
     }
 
-    function performLogin(page) {
-        var credentials = plugin.getAuthCredentials(plugin.getDescriptor().synopsis, "Login required", true);
-        var response, result;
-        if (credentials.rejected) return false; //rejected by user
-        if (credentials) {
-            response = showtime.httpReq("http://login1.bogi.ru/login.php?referer=https://www.lostfilm.tv", {
-                postdata: {
-                    'login': credentials.username,
-                    'password': credentials.password,
-                    'module': 1,
-                    'target': 'http://lostfilm.tv',
-                    'repage': 'user',
-                    'act': 'login'
-                },
-                noFollow: true,
-                headers: {
-                    'Upgrade-Insecure-Requests': 1,
-                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': 'http://www.lostfilm.tv',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cookie': ''
-                }
-            });
+    // ====== auth
 
-            showtime.print("LOSTFILM login (phase 1) response:");
-            showtime.print(response.toString());
+    function checkAuthOnce(page) {
+        var pagelogin = http.request("http://www.lostfilm.tv/v_search.php?c=190&s=4&e=22", {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
 
-            var bogiDom = html.parse(response.toString());
-            var formAction = bogiDom.root.getElementById("b_form").attributes.getNamedItem("action");
-            showtime.print("LOSTFILM login action url: " + formAction["value"]);
+        if (/log in first/i.test(pagelogin)) {
+            authRequired = true;
 
-            var inputs = bogiDom.root.getElementById("b_form").getElementByTagName("input");
-            var outputs = {};
-            for (var i = 0; i < inputs.length; ++i) {
-                // showtime.print("LOSTFILM login input: " + ));
-                var inputName = inputs[i].attributes.getNamedItem("name");
-                var inputValue = inputs[i].attributes.getNamedItem("value");
-                if (inputName && inputValue) {
-                    var resultName = inputName["value"];
-                    var resultValue = inputValue["value"];
-                    // showtime.print("LOSTFILM login input value " + i + ": [" + resultName + ":" + resultValue + "]");
-                    outputs[resultName] = resultValue;
+            if (!authChecked) {
+                authChecked = true;
+                var authNow = showtime.message("Login required. Do you want to log in now?", true, true);
+                if (authNow) {
+                    authRequired = performLogin(page) == false;
                 }
             }
-            // showtime.print("LOSTFILM postdata: " + JSON.stringify(outputs));
-
-            response = showtime.httpReq(formAction["value"], {
-                postdata: outputs,
-                noFollow: true,
-                headers: {
-                    'Upgrade-Insecure-Requests': 1,
-                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
-                    'Referer': 'http://www.lostfilm.tv',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Cookie': ''
-                }
-            });
-
-            saveUserCookie(response.multiheaders);
-            return true;
         } else {
+            authRequired = false;
+        }
+
+        authChecked = true;
+    }
+
+    function validateEmail(email) {
+        return (/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email));
+    }
+
+    function getEmailByLogin(credentials) {
+        var response = http.request("http://login1.bogi.ru/login.php?referer=" + BASE_URL, {
+            debug: store.enableDebug,
+            postdata: {
+                'login': credentials.username,
+                'password': credentials.password,
+                'module': 1,
+                'target': BASE_URL,
+                'repage': 'user',
+                'act': 'login'
+            },
+            noFollow: true,
+            headers: {
+                'Upgrade-Insecure-Requests': 1,
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
+                'Referer': BASE_URL,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': ''
+            }
+        });
+
+        var email = "";
+
+        var bogiDom = html.parse(response.toString());
+        var b_form = bogiDom.root.getElementById("b_form");
+        if (!b_form) {
+            return email;
+        }
+
+        var inputs = b_form.getElementByTagName("input");
+
+        if (!inputs) {
+            return email;
+        }
+
+        for (var i = 0; i < inputs.length; ++i) {
+            var inputName = inputs[i].attributes.getNamedItem("name").value;
+            var inputValue = inputs[i].attributes.getNamedItem("value").value;
+            if (inputName === "email") {
+                email = inputValue;
+                break;
+            }
+        }
+
+        return email;
+    }
+
+    function performLogin(page) {
+        var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", false);
+
+        if (!credentials || !credentials.username || !credentials.password) {
+            // need to ask to credentials first
+            credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", true);
+        }
+
+        if (credentials && credentials.rejected) {
+            printDebug("performLogin(): credentials.rejected");
+            return false;
+        } else if (credentials) {
+            var username = credentials.username;
+
+            if (!validateEmail(username)) {
+                // old auth method
+                printDebug("performLogin(): old auth method");
+                username = getEmailByLogin(credentials);
+                if (username.length <= 0) {
+                    // failed to get email
+                    printDebug("performLogin(): old auth method: failed to get email by username");
+                    showtime.message("Failed to get email by username. Please use email as username", true, false);
+                    return false;
+                }
+            }
+
+            return performLoginInternal(page, username, credentials.password);
+        }
+
+        showtime.message("Ooops. Something goes wrong.", true, false);
+        return false;
+    }
+
+    function performLoginInternal(page, username, password, captcha) {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: true,
+            postdata: {
+                'act': 'users',
+                'type': 'login',
+                'mail': encodeURIComponent(username),
+                'pass': password,
+                'need_captcha': captcha ? 1 : 0,
+                'captcha': captcha || "",
+                'rem': 1
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+
+        if (/need_captcha/i.test(response) && !captcha) {
+            page.redirect(PREFIX + ":performCaptchaLogin:" + username + ":" + password);
             return false;
         }
+
+        var responseObj = showtime.JSONDecode(response.toString());
+
+        if (!responseObj || !responseObj.success) {
+            printDebug("performLogin(): !responseObj || !responseObj.success");
+            showtime.message("Login was unsuccessfull, please try again", true, false);
+            return false;
+        }
+
+        store.username = responseObj.name;
+
+        return saveUserCookie(response.multiheaders);
+    }
+
+    function performCaptchaLogin(page, username, password) {
+        page.loading = true;
+
+        var rand = Math.random();
+        var captchaResponse = http.request(BASE_URL + "simple_captcha.php?" + rand, {debug: true, headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+            'Cookie': ''
+        }});
+        saveUserCookie(captchaResponse.multiheaders);
+
+        page.type = "directory";
+        page.metadata.logo = LOGO;
+        page.metadata.title = "Login";
+        page.metadata.glwview = plugin.path + "views/captchaLogin.view";
+        page.appendPassiveItem("customString", {value: username}, {title: "Login"});
+        page.appendPassiveItem("customString", {value: password, password: true}, {title: "Password"});
+        page.appendPassiveItem("customImage", undefined, {icon: "http://www.lostfilm.tv/simple_captcha.php?" + rand});
+        page.appendPassiveItem("customString", { value: "" }, {title: "Captcha"});
+
+        page.appendAction("Login", function() {
+            // FIXME!
+            // yup, thats dirty, but what can I do?
+            var items = page.getItems();
+            var finalUsername = items[0].root.data.value;
+            var finalPassword = items[1].root.data.value;
+            var captcha = items[3].root.data.value;
+
+            if (performLoginInternal(page, finalUsername, finalPassword, captcha)) {
+                page.redirect(PREFIX + ":start");
+            } else {
+                items[2].root.metadata.icon = "http://www.lostfilm.tv/simple_captcha.php?" + Math.random();
+            }
+        }, "hello-there");
+
+        page.loading = false;
+    }
+
+    function performLogout() {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
+            postdata: {
+                'act': 'users',
+                'type': 'logout'
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+        store.userCookie = "";
+        store.username = undefined;
+        authRequired = true;
     }
 
     function saveUserCookie(headers) {
         var cookie;
         if (!headers) return false;
         cookie = headers["Set-Cookie"];
-        showtime.print("LOSTFILM cookies...");
-        if (cookie) {
-            cookie.join("");
-            showtime.print(cookie);
-            store.userCookie = cookie;
+        var resultCookies = "";
+        for (var i = 0; i < cookie.length; ++i) {
+            if (cookie[i].indexOf("=deleted") >= 0) {
+                continue;
+            }
+            resultCookies += cookie[i];
         }
+        store.userCookie = resultCookies;
+        return true;
+    }
+
+    // ====== auth END
+
+    function search(page, query) {
+        var response = http.request(BASE_URL + "ajaxik.php", {
+            debug: store.enableDebug,
+            postdata: {
+                'act': 'common',
+                'type': 'search',
+                'val': query
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+
+        var series = showtime.JSONDecode(response.toString()).data["series"];
+        for (var i = 0; i < series.length; ++i) {
+            page.appendItem(PREFIX + ":serialInfo:" + series[i].title + ":" + series[i].id + ":" + series[i].link, "video", {
+                title: series[i].title,
+                description: series[i].title,
+                icon: "http://static.lostfilm.tv/Images/" + series[i].id + "/Posters/poster.jpg"
+            });
+        }
+
+        page.entries = series.length;
     }
 })(this);

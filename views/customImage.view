@@ -1,0 +1,19 @@
+#import "skin://theme.view"
+
+widget(container_z, {
+    height: 5em;
+
+  ListItemBevel();
+  ListItemHighlight();
+
+  focusable: false;
+  onEvent(activate, navOpen("slideshow:" + $self.url, void, $self, $parent.model, void, $parent.url));
+  onEvent(itemMenu, eventWithProp(defaultInfo, $self));
+
+  widget(container_x, {
+    style: "ListItem";
+    widget(image, {
+      source: $self.metadata.icon ?? ("thumb://" + $self.url);
+    });
+  });
+});

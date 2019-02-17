@@ -15,7 +15,7 @@ widget(container_z, {
 
     widget(icon, {
       alpha: select($self.restartpos > 0 || $self.playcount > 0 || $self.metadata.watched, 1, 0);
-      source: select($self.playcount > 0 || $self.metadata.watched, "../icons/watched.svg", "../icons/in-progress.svg");
+      source: select($self.playcount > 0 || $self.metadata.watched, "watched.svg", "in-progress.svg");
 
       style: "ListItemIcon";
     });

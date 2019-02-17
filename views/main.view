@@ -29,8 +29,8 @@ widget(container_z, {
           time: 0.1;
           effect: blend;
           noInitialTransform: true;
-          //alt: "skin://items/list/default.view";
-          source: select($self.type == "video", "episode.view", "skin://items/list/" + $self.type + ".view");
+          alt: "skin://items/list/default.view";
+          source: "skin://items/list/" + $self.type + ".view";
         });
 
         widget(loader, {
@@ -61,7 +61,7 @@ widget(container_z, {
           time: 0.1;
           effect: blend;
           noInitialTransform: true;
-          source: "skin://items/details/nothing.view";
+          source: "serial_details.view";
           alt: "skin://items/details/nothing.view";
         });
       });

@@ -1,0 +1,62 @@
+#include "skin://theme.view"
+
+widget(container_z, {
+  ListItemBevel();
+  ListItemHighlight();
+  clickable: true;
+  onEvent(activate, {
+    focus("textInput");
+  });
+  onEvent(itemMenu, deliverEvent($self.data.value, "reset"));
+
+  height: 2em;
+
+  widget(container_x, {
+    style: "ListItem";
+
+    widget(icon, {
+      style: "ListItemIcon";
+    });
+
+    widget(label, {
+      caption: $self.metadata.title + ":";
+      style: ["ListItemLabel", "ListItemLabelContainer"];
+    });
+
+    widget(container_y, {
+      align: center;
+      widget(container_z, {
+        height: 1em;
+        filterConstraintX: true;
+
+        widget(quad, {
+          zoffset: 0;
+          color: 0;
+          alpha: 0.3 + $view.isNavFocused;
+        });
+
+        widget(label, {
+          hidden: select($self.data.value, true, false);
+          caption: $self.defaultValue;
+          padding: [1em, 0, 0, 0];
+          font: "skin://fonts/RobotoCondensed-Regular.ttf";
+          color: 0.5;
+        });
+
+        widget(text, {
+          description: $self.metadata.title;
+          password: $self.data.password;
+          fileRequest: $self.data.fileRequest;
+          dirRequest: $self.data.dirRequest;
+
+          padding: [1em, 0, 0, 0];
+          font: "skin://fonts/RobotoCondensed-Regular.ttf";
+          id: "textInput";
+          focusable: true;
+          $view.isNavFocused = isNavFocused();
+          bind($self.data.value);
+        });
+      });
+    });
+  });
+});
