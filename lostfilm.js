@@ -194,11 +194,11 @@
                 });
             }
 
-            if (s !== 2) {
+//removed for Favorites listing            if (s !== 2) 
                 page.appendItem(PREFIX + ":allSerials:" + name + ":" + s + ":" + t, "directory", {
                     title: "Show all..."
                 });
-            }
+
         }
     }
 
