@@ -1,0 +1,9 @@
+[ ] favorites: action to mark/unmark series as favorite (website mirror)
+    issue: unclear how to process main page list update
+[ ] watched: automatically mark episode as watched after play requested (website mirror)
+    issue: 'session' param added; uclear how to process that
+[ ] rework authentication flow (currently it is possible to stuck on login procedure)
+[ ] movian: looks like there is an issue with canonicalUrl for torrent: endpoint; check that
+[ ] favorites: mark series somehow to notify about new episodes available
+[ ] series(/side view): show next episode availability date
+    or show greyed out episode in the list?
