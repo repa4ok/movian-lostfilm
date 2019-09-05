@@ -42,7 +42,7 @@
     settings.createBool("showFinished", "Finished", true, function(v) { store.showFinished = v; });
 
     function printDebug(message) {
-        if (store.enableDebug) showtime.print(message);
+        if (store.enableDebug) console.error(message);
     }
 
     plugin.search = true;
@@ -52,8 +52,8 @@
     plugin.addURI(PREFIX + ":allSerials:(.*):(.*):(.*)", populateAll);
     plugin.addURI(PREFIX + ":serialInfo:(.*):(.*):(.*)", serialInfo);
     plugin.addURI(PREFIX + ":torrent:(.*):(.*)", function (page, serieName, dataCode) {
+        page.type = "video";
         page.loading = true;
-        printDebug(PREFIX + ":torrent:" + serieName + ":" + dataCode);
 
         if (authRequired) {
             authRequired = performLogin(page) == false;
@@ -74,6 +74,7 @@
                 'Cookie': store.userCookie
             }
         });
+
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         var response = http.request(torrentsUrl, {
             headers: {
@@ -125,23 +126,15 @@
             return;
         }
 
-        // set watched if it wasn't before
-        var watchedSeries = getWatched(attributes[0]);
-        if (watchedSeries.indexOf(dataCode) < 0) {
-            toggleWatched(dataCode);
-        }
-
-        printDebug("[LOGME] desiredUrl => " + 'torrent:video:' + desiredUrl)
-
+        var canonicalUrl = PREFIX + ":torrent:" + serieName + ":" + dataCode;
         page.loading = false;
         page.source = "videoparams:" + showtime.JSONEncode({
             title: serieName,
-            canonicalUrl: PREFIX + ":torrent:" + serieName + ":" + dataCode,
+            canonicalUrl: canonicalUrl,
             sources: [{
                 url: 'torrent:video:' + desiredUrl
             }]
         });
-        page.type = "video";
     });
 
     function start(page) {
@@ -194,11 +187,11 @@
                 });
             }
 
-//removed for Favorites listing            if (s !== 2) 
+            if (s != 2 || serialsList.length >= 10) {
                 page.appendItem(PREFIX + ":allSerials:" + name + ":" + s + ":" + t, "directory", {
                     title: "Show all..."
                 });
-
+            }
         }
     }
 
@@ -240,6 +233,7 @@
 
     function getSerialDescription(serialID, serialUrl) {
         printDebug("getSerialDescription(" + serialID + ", " + serialUrl + ")");
+
         var checkCache = plugin.cacheGet("SerialsDescriptions", serialID.toString());
         if (checkCache && checkCache.length > 0) {
             return checkCache;
@@ -251,13 +245,18 @@
                 'Cookie': store.userCookie
             }
         });
+
         var description = html.parse(response.toString()).root.getElementByClassName("text-block description")[0].getElementByClassName("body")[0].getElementByClassName("body")[0].textContent;
-        plugin.cachePut("SerialsDescriptions", serialID.toString(), description, 604800);
+        if (description) {
+            plugin.cachePut("SerialsDescriptions", serialID.toString(), description, 604800);
+        }
+
         return description;
     }
 
     function getSerialList(o, s, t) {
         printDebug("getSerialList(" + o + ", " + s + ", " + t + ")");
+
         // s: 1=>by rating; 2=>by alphabet; 3=>by date
         var response = http.request(BASE_URL + "ajaxik.php", {
             debug: store.enableDebug,
@@ -273,61 +272,14 @@
                 'Cookie': store.userCookie
             }
         });
+
         return showtime.JSONDecode(response.toString()).data;
-    }
-
-    // not used
-    function setFavorite(serialID, enabled) {
-        var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: store.enableDebug,
-            postdata: {
-                'act': 'serial',
-                'type': 'follow',
-                'id': serialID
-            },
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
-                'Cookie': store.userCookie
-            }
-        });
-    }
-
-    function toggleWatched(dataCode) {
-        var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: store.enableDebug,
-            postdata: {
-                'act': 'serial',
-                'type': 'markepisode',
-                'val': dataCode
-            },
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
-                'Cookie': store.userCookie
-            }
-        });
-    }
-
-    function getWatched(serialID) {
-        printDebug("getWatched(" + serialID + ")");
-        var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: store.enableDebug,
-            postdata: {
-                'act': 'serial',
-                'type': 'getmarks',
-                'id': serialID
-            },
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
-                'Cookie': store.userCookie
-            }
-        });
-        var responseObj = showtime.JSONDecode(response.toString());
-        return responseObj.data || [];
     }
 
     function serialInfo(page, serialName, serialID, url) {
         printDebug("serialInfo(" + serialName + ", " + serialID + ", " + url + ")");
-        page.metadata.logo = LOGO;
+
+        page.metadata.logo = "http://static.lostfilm.tv/Images/" + serialID + "/Posters/poster.jpg";
         page.metadata.title = serialName;
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/serial.view";
@@ -339,22 +291,11 @@
                 'Cookie': store.userCookie
             }
         });
+
         var rootObj = html.parse(response.toString()).root;
-
-        // OMG how dirty...
-        // postponed due to main page not updated
-        /*
-        var isFavorite = rootObj.getElementByClassName("favorites-btn").toString().length;
-        page.options.createBool(serialID + "_fav", "Favorite", isFavorite, function(v) {
-            if (v != isFavorite) {
-                setFavorite(serialID, v);
-                page.redirect(PREFIX + ":serialInfo:" + serialName + ":" + serialID + ":" + url);
-            }
-        });
-        */
-
         var seasonsList = rootObj.getElementByClassName("serie-block");
         var seasonsMap = [];
+
         for (var i = 0; i < seasonsList.length; ++i) {
             var seasonEmpty = true;
             var seasonSeries = seasonsList[i].getElementByTagName("tr");
@@ -397,10 +338,10 @@
                 }
                 var dataCode = seriesList[j].getElementByClassName(["alpha"])[0].children[0].attributes.getNamedItem("data-code").value;
                 var serieDiv = seriesList[j].getElementByClassName(["gamma"])[0].children[0];
-                var serieDirtyName = serieDiv.textContent.trim();
-                var serieNativeName = serieDiv.getElementByTagName("span")[0].textContent;
+                var serieDirtyName = serieDiv.textContent;
+                var serieNativeName = serieDiv.getElementByTagName("span")[0].textContent.trim();
                 var serieNumber = store.sorting === "asc" ? j : seriesList.length - j;
-                var serieName = serieDirtyName.replace(serieNativeName, "") + " (" + serieNativeName + ")";
+                var serieName = serieDirtyName.replace(serieNativeName, "").trim() + " (" + serieNativeName + ")";
 
                 page.appendItem(PREFIX + ":torrent:" + serieName + ":" + dataCode, "video", {
                     title: new showtime.RichText("<font color='#b3b3b3'>[" + (serieNumber < 10 ? "0" : "") + serieNumber + "]</font>    " + serieName)
@@ -412,16 +353,14 @@
     }
 
     // ====== auth
-
     function checkAuthOnce(page) {
-        var pagelogin = http.request("http://www.lostfilm.tv/v_search.php?c=190&s=4&e=22", {
-            headers: {
+        var pageLogin = showtime.httpGet("http://www.lostfilm.tv/v_search.php",
+            { 'c': '190', 's': '4', 'e': '22' }, {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
-            }
-        });
+            }, { noFollow: true });
 
-        if (/log in first/i.test(pagelogin)) {
+        if (pageLogin.statuscode == 302 || !store.username) {
             authRequired = true;
 
             if (!authChecked) {
@@ -519,13 +458,13 @@
             return performLoginInternal(page, username, credentials.password);
         }
 
-        showtime.message("Ooops. Something goes wrong.", true, false);
+        showtime.message("Ooops. Something went wrong.", true, false);
         return false;
     }
 
     function performLoginInternal(page, username, password, captcha) {
         var response = http.request(BASE_URL + "ajaxik.php", {
-            debug: true,
+            debug: store.enableDebug,
             postdata: {
                 'act': 'users',
                 'type': 'login',
@@ -555,7 +494,6 @@
         }
 
         store.username = responseObj.name;
-
         return saveUserCookie(response.multiheaders);
     }
 
@@ -563,7 +501,7 @@
         page.loading = true;
 
         var rand = Math.random();
-        var captchaResponse = http.request(BASE_URL + "simple_captcha.php?" + rand, {debug: true, headers: {
+        var captchaResponse = http.request(BASE_URL + "simple_captcha.php?" + rand, {debug: store.enableDebug, headers: {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
             'Cookie': ''
         }});
@@ -577,10 +515,8 @@
         page.appendPassiveItem("customString", {value: password, password: true}, {title: "Password"});
         page.appendPassiveItem("customImage", undefined, {icon: "http://www.lostfilm.tv/simple_captcha.php?" + rand});
         page.appendPassiveItem("customString", { value: "" }, {title: "Captcha"});
-
         page.appendAction("Login", function() {
-            // FIXME!
-            // yup, thats dirty, but what can I do?
+            // yup, thats dirty. i was unable to find a better way of communication btw view and js
             var items = page.getItems();
             var finalUsername = items[0].root.data.value;
             var finalPassword = items[1].root.data.value;
@@ -614,20 +550,23 @@
     }
 
     function saveUserCookie(headers) {
-        var cookie;
-        if (!headers) return false;
-        cookie = headers["Set-Cookie"];
+        if (!headers) {
+            return false;
+        }
+
+        var cookie = headers["Set-Cookie"];
         var resultCookies = "";
+
         for (var i = 0; i < cookie.length; ++i) {
             if (cookie[i].indexOf("=deleted") >= 0) {
                 continue;
             }
             resultCookies += cookie[i];
         }
+
         store.userCookie = resultCookies;
         return true;
     }
-
     // ====== auth END
 
     function search(page, query) {
@@ -645,6 +584,7 @@
         });
 
         var series = showtime.JSONDecode(response.toString()).data["series"];
+
         for (var i = 0; i < series.length; ++i) {
             page.appendItem(PREFIX + ":serialInfo:" + series[i].title + ":" + series[i].id + ":" + series[i].link, "video", {
                 title: series[i].title,
