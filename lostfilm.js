@@ -94,6 +94,7 @@
             var currentTorrent = torrentArr[i];
             var currentTorrentLabel = currentTorrent.getElementByClassName("inner-box--label")[0].textContent.trim().toLowerCase();
             var currentTorrentLink = currentTorrent.getElementByClassName("inner-box--link main")[0].children[0].attributes.getNamedItem("href").value;
+            var currentTorrentEpisode = /серия/.test(currentTorrent.getElementByClassName("inner-box--link main")[0].textContent);
 
             if (currentTorrentLabel == "sd") {
                 foundTorrents["sd"] = currentTorrentLink;
@@ -125,6 +126,7 @@
             page.error("Failed to find desired torrent.");
             return;
         }
+        if (!currentTorrentEpisode) page.redirect(desiredUrl);
 
         var canonicalUrl = PREFIX + ":torrent:" + serieName + ":" + dataCode;
         page.loading = false;
