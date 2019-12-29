@@ -35,6 +35,12 @@
                 store.sorting = v;
             }
     });
+    settings.createAction("clearCache", "Clear plugin cache (login, password, cookies, etc.)", function() {
+        store.username = "";
+        store.userCookie = "";
+        store.cfClearance = "";
+        showtime.message("Cache has beed cleared", true, false)
+    });
     settings.createDivider("Categories visibility");
     settings.createBool("showPopular", "Popular", true, function(v) { store.showPopular = v; });
     settings.createBool("showNew", "New", true, function(v) { store.showNew = v; });
@@ -68,10 +74,16 @@
         var c = attributes[0];
         var s = attributes[1];
         var e = attributes[2];
-        var response = http.request(BASE_URL + "v_search.php?c=" + c + "&s=" + s + "&e=" + e, {
+
+        var searchUrl = BASE_URL + "v_search.php?a=" + formatEpisodeID(c, s, e);
+
+        checkDDoSProtection(searchUrl);
+
+        var response = http.request(searchUrl, {
+            debug: store.enableDebug,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
-                'Cookie': store.userCookie
+                'Cookie': store.userCookie + store.cfClearance
             }
         });
 
@@ -138,6 +150,48 @@
             }]
         });
     });
+    plugin.addURI(PREFIX + ":shedule", function (page) {
+        page.metadata.title = "Schedule";
+        page.type = "directory";
+        page.metadata.glwview = plugin.path + "views/serial.view";
+        page.loading = true;
+
+        var response = http.request(BASE_URL + "/schedule/my_0", {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+
+        var rootObj = html.parse(response.toString()).root;
+        var tableRows = rootObj.getElementByClassName("schedule-list")[0].getElementByTagName("tr");
+
+        for (var i = 0; i < tableRows.length; ++i) {
+            var row = tableRows[i];
+            var isHeader = row.getElementByTagName("th")[0];
+            if (isHeader) {
+                page.appendItem("", "separator", {
+                    title: isHeader.textContent
+                });
+            } else {
+                var serialTitle = row.getElementByClassName("title-block")[0].getElementByClassName("ru")[0].textContent.trim();
+                var serieNumber = row.getElementByClassName("serie-number-box")[0].textContent.trim();
+                var date = row.getElementByClassName("delta")[0].textContent.trim().split("\n")[0];
+                var serieName = row.getElementByClassName("gamma")[0].textContent.trim();
+                var serieNameEn = row.getElementByClassName("gamma")[0].getElementByTagName("span")[0].textContent;
+                if (serieNameEn) {
+                    serieName = serieName.replace(serieNameEn.trim(), "").trim();
+                }
+
+                var itemText = "<font color='#b3b3b3'>" + date + "</font>    " + serialTitle + ": " + serieName + " <font color='#b3b3b3'>(" + serieNumber + ")</font>";
+                page.appendPassiveItem("video", {}, {
+                    title: new showtime.RichText(itemText)
+                });
+            }
+        }
+
+        page.loading = false;
+    });
 
     function start(page) {
         page.loading = true;
@@ -146,6 +200,8 @@
         page.metadata.title = TITLE;
         page.type = "directory";
         page.metadata.glwview = plugin.path + "views/main.view";
+
+        checkAuthOnce(page);
 
         var loginField = store.username && store.username.length > 0 ? ("Signed as " + store.username + ". Logout?") : "Sign in";
         page.options.createAction("username", loginField, function() {
@@ -158,18 +214,27 @@
             page.redirect(PREFIX + ":start");
         });
 
-        checkAuthOnce(page);
-
         populateMainPage(page);
         page.loading = false;
     }
 
     function populateMainPage(page) {
+        if (authRequired === false) populateSchedule(page);
         if (authRequired === false) populateSerials(page, "Favorites", 2, 99);
         if (store.showPopular) populateSerials(page, "Popular", 1, 0);
         if (store.showNew) populateSerials(page, "New", 1, 1);
         if (store.showFilming) populateSerials(page, "Filming", 1, 2);
         if (store.showFinished) populateSerials(page, "Finished", 1, 5);
+    }
+
+    function populateSchedule(page) {
+        page.appendItem("", "separator", {
+            title: "Schedule"
+        });
+
+        page.appendItem(PREFIX + ":shedule", "directory", {
+            title: "Show schedule"
+        });
     }
 
     function populateSerials(page, name, s, t) {
@@ -356,13 +421,19 @@
 
     // ====== auth
     function checkAuthOnce(page) {
-        var pageLogin = showtime.httpGet("http://www.lostfilm.tv/v_search.php",
-            { 'c': '190', 's': '4', 'e': '22' }, {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
-                'Cookie': store.userCookie
-            }, { noFollow: true });
+        var pageLoginUrl = BASE_URL + "v_search.php?a=" + formatEpisodeID(190, 4, 22);
 
-        if (pageLogin.statuscode == 302 || !store.username) {
+        checkDDoSProtection(pageLoginUrl);
+
+        var pageLogin = http.request(pageLoginUrl, { noFollow: true, debug: store.enableDebug, headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+            'Cookie': store.userCookie + store.cfClearance
+        }});
+
+        var redirectLocation = pageLogin.multiheaders["Location"] ? pageLogin.multiheaders["Location"][0] : "";
+
+        if ((pageLogin.statuscode == 302 && redirectLocation.indexOf("/login") >= 0) || !store.username) {
+            printDebug("pageLogin.statuscode == 302 || !store.username. authRequired => true");
             authRequired = true;
 
             if (!authChecked) {
@@ -434,7 +505,7 @@
     function performLogin(page) {
         var credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", false);
 
-        if (!credentials || !credentials.username || !credentials.password) {
+        if (!credentials || !credentials.username || !credentials.password || !store.username) {
             // need to ask to credentials first
             credentials = plugin.getAuthCredentials(SYNOPSIS, "Login required.", true);
         }
@@ -487,15 +558,13 @@
             return false;
         }
 
-        var responseObj = showtime.JSONDecode(response.toString());
-
-        if (!responseObj || !responseObj.success) {
-            printDebug("performLogin(): !responseObj || !responseObj.success");
+        if (response.statuscode != 200) {
+            printDebug("performLogin(): response.statuscode != 200");
             showtime.message("Login was unsuccessfull, please try again", true, false);
             return false;
         }
 
-        store.username = responseObj.name;
+        store.username = username;
         return saveUserCookie(response.multiheaders);
     }
 
@@ -546,8 +615,10 @@
                 'Cookie': store.userCookie
             }
         });
+
         store.userCookie = "";
-        store.username = undefined;
+        store.cfClearance = "";
+        store.username = "";
         authRequired = true;
     }
 
@@ -563,13 +634,100 @@
             if (cookie[i].indexOf("=deleted") >= 0) {
                 continue;
             }
-            resultCookies += cookie[i];
+            resultCookies += cookie[i].slice(0, cookie[i].indexOf(';') + 1);
         }
 
         store.userCookie = resultCookies;
+
         return true;
     }
+
+    function saveCfClearance(value) {
+        store.cfClearance = value;
+    }
     // ====== auth END
+
+    function zeroPad(num, places) {
+        num = num.toString();
+        while (num.length < places) num = "0" + num;
+        return num;
+    }
+
+    function formatEpisodeID(c, s, e) {
+        var result = zeroPad(c, 3) + zeroPad(s, 3) + zeroPad(e, 3);
+        return result;
+    }
+
+    function checkDDoSProtection(url) {
+        var response = http.request(url, {
+            noFail: true,
+            debug: store.enableDebug,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie + store.cfClearance
+            }
+        });
+
+        if (response.statuscode != 503) {
+            printDebug("response.statuscode != 503 => seems like there is no ddos protection enabled");
+            return;
+        }
+
+        // we need to wait 4 seconds before respoding, otherwise response will not be accepted
+        showtime.sleep(4);
+
+        const pageDom = html.parse(response.toString()).root;
+        var clearanceCode = pageDom.getElementByTagName("script")[0].textContent;
+
+        // find first part of the clearance code to evaluate
+        var firstExpression = clearanceCode.match(/[ ][A-Za-z]{7}={".*/g)[0].trim();
+        var objectName = firstExpression.slice(0, firstExpression.indexOf("="));
+        var propertyName = firstExpression.slice(firstExpression.indexOf("\"") + 1, firstExpression.indexOf("\"", firstExpression.indexOf("\"") + 1));
+
+        // find second part of the clearance code to evaluate
+        var secondExpressionPattern = "\\b" + objectName + "\\b\\.\\b" + propertyName + "\\b[+\\-*/]=.*;[a]";
+        var secondExpression = clearanceCode.match(secondExpressionPattern)[0].slice(0, -1);
+
+        // evaluate expression to fill jschl-answer
+        var expressionScript = "function f() { " + firstExpression + secondExpression + " return " + objectName + "." + propertyName + "; }; f();";
+        var clearanceExpressionValue = eval(expressionScript);
+        var clearanceFinalValue = eval("+" + clearanceExpressionValue + " + " + "www.lostfilm.tv".length).toFixed(10);
+
+        // gather other static fields
+        var challengeForm = pageDom.getElementById("challenge-form");
+        var clearanceInputs = challengeForm.getElementByTagName("input");
+        var clearancePostData = {};
+
+        for (var i = 0; i < clearanceInputs.length; ++i) {
+            var name = clearanceInputs[i].attributes.getNamedItem("name").value;
+            var valueItem = clearanceInputs[i].attributes.getNamedItem("value");
+            clearancePostData[name] = valueItem ? valueItem.value : clearanceFinalValue;
+        }
+
+        // url to post all the data to
+        var clearanceUrl = challengeForm.attributes.getNamedItem("action").value;
+
+        var response = http.request(BASE_URL + clearanceUrl.slice(1), {
+            noFail: true,
+            noFollow: true,
+            debug: store.enableDebug,
+            postdata: clearancePostData,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
+                'Cookie': store.userCookie
+            }
+        });
+
+        // store clearance cookie to enable further requests
+        var setCookieHeaders = response.multiheaders["Set-Cookie"];
+        for (var i = 0; i < setCookieHeaders.length; ++i) {
+            var header = setCookieHeaders[i];
+            if (header.indexOf("cf_clearance") >= 0) {
+                saveCfClearance(header.slice(0, header.indexOf(';') + 1));
+                break;
+            }
+        }
+    }
 
     function search(page, query) {
         var response = http.request(BASE_URL + "ajaxik.php", {
