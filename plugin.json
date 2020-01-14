@@ -3,7 +3,7 @@
     "id": "testlostfilm",
     "file": "lostfilm.js",
     "showtimeVersion": "4.9.401",
-    "version": "0.4.5",
+    "version": "0.4.6",
     "author": "mpertsov",
     "homepage": "https://github.com/mpertsov/movian-lostfilm",
     "title": "LostFilm.TV",

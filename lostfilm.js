@@ -4,7 +4,7 @@
     var VERSION = plugin.getDescriptor().version;
     var SYNOPSIS = plugin.getDescriptor().synopsis;
     var LOGO = plugin.path + "logo.png";
-    var BASE_URL = "http://www.lostfilm.tv/";
+    var BASE_URL = "https://www.lostfilm.tv/";
 
     var service = require("showtime/service");
     var http = require("./http");
