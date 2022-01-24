@@ -82,6 +82,7 @@
         var response = http.request(searchUrl, {
             debug: store.enableDebug,
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie + store.cfClearance
             }
@@ -90,6 +91,7 @@
         var torrentsUrl = html.parse(response.toString()).root.getElementByTagName("meta")[0].attributes.getNamedItem("content")["value"].replace("0; url=", "");
         var response = http.request(torrentsUrl, {
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -158,6 +160,7 @@
 
         var response = http.request(BASE_URL + "/schedule/my_0", {
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -308,6 +311,7 @@
 
         var response = http.request(BASE_URL + serialUrl, {
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -335,6 +339,7 @@
                 't': t || '0'
             },
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -354,6 +359,7 @@
 
         var response = http.request(BASE_URL + url + "/seasons/", {
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -426,6 +432,7 @@
         checkDDoSProtection(pageLoginUrl);
 
         var pageLogin = http.request(pageLoginUrl, { noFollow: true, debug: store.enableDebug, headers: {
+            'Referer': BASE_URL,
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
             'Cookie': store.userCookie + store.cfClearance
         }});
@@ -471,6 +478,7 @@
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0',
                 'Referer': BASE_URL,
                 'Content-Type': 'application/x-www-form-urlencoded',
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': ''
             }
@@ -548,6 +556,7 @@
                 'rem': 1
             },
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -573,6 +582,7 @@
 
         var rand = Math.random();
         var captchaResponse = http.request(BASE_URL + "simple_captcha.php?" + rand, {debug: store.enableDebug, headers: {
+            'Referer': BASE_URL,
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
             'Cookie': ''
         }});
@@ -611,6 +621,7 @@
                 'type': 'logout'
             },
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -627,7 +638,7 @@
             return false;
         }
 
-        var cookie = headers["Set-Cookie"];
+        var cookie = headers["Set-Cookie"] || headers["set-cookie"];
         var resultCookies = "";
 
         for (var i = 0; i < cookie.length; ++i) {
@@ -663,6 +674,7 @@
             noFail: true,
             debug: store.enableDebug,
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie + store.cfClearance
             }
@@ -713,6 +725,7 @@
             debug: store.enableDebug,
             postdata: clearancePostData,
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
@@ -738,6 +751,7 @@
                 'val': query
             },
             headers: {
+                'Referer': BASE_URL,
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/604.4.7 (KHTML, like Gecko) Version/11.0.2 Safari/604.4.7',
                 'Cookie': store.userCookie
             }
